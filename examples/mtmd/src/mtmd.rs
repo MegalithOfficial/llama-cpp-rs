@@ -108,6 +108,9 @@ impl<'a> MtmdCliContext<'a> {
                     .unwrap_or(&llama_cpp_2::mtmd::mtmd_default_marker().to_string())
                     .clone(),
             )?,
+            batch_max_tokens: 1024,
+            progress_callback: None,
+            progress_callback_user_data: std::ptr::null_mut(),
         };
 
         let mtmd_ctx = MtmdContext::init_from_file(&params.mmproj_path, model, &mtmd_params)?;

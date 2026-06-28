@@ -638,6 +638,12 @@ impl LlamaModel {
         unsafe { llama_cpp_sys_2::llama_n_embd(self.model.as_ptr()) }
     }
 
+    /// Get the input embedding width of the model.
+    #[must_use]
+    pub fn n_embd_inp(&self) -> c_int {
+        unsafe { llama_cpp_sys_2::llama_model_n_embd_inp(self.model.as_ptr()) }
+    }
+
     /// Get the output embedding width of the model.
     ///
     /// For most models this equals [`Self::n_embd`]. Drafter models that project their hidden
@@ -677,6 +683,14 @@ impl LlamaModel {
         // It's never possible for this to panic because while the API interface is defined as an int32_t,
         // the field it's accessing is a uint32_t.
         u32::try_from(unsafe { llama_cpp_sys_2::llama_model_n_layer(self.model.as_ptr()) }).unwrap()
+    }
+
+    /// Returns the number of next-token-prediction layers within the model.
+    pub fn n_layer_nextn(&self) -> u32 {
+        // It's never possible for this to panic because while the API interface is defined as an int32_t,
+        // the field it's accessing is a uint32_t.
+        u32::try_from(unsafe { llama_cpp_sys_2::llama_model_n_layer_nextn(self.model.as_ptr()) })
+            .unwrap()
     }
 
     /// Returns the number of attention heads within the model.

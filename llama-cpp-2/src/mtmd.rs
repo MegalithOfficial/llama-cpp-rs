@@ -5,7 +5,8 @@
 //!
 //! # Warning
 //! This API is experimental and subject to breaking changes.
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
+use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::slice;
 
@@ -63,6 +64,9 @@ impl From<llama_cpp_sys_2::mtmd_input_chunk_type> for MtmdInputChunkType {
 ///     print_timings: true,
 ///     n_threads: 4,
 ///     media_marker: CString::new(mtmd_default_marker()).unwrap(),
+///     batch_max_tokens: 1024,
+///     progress_callback: None,
+///     progress_callback_user_data: std::ptr::null_mut(),
 /// };
 /// ```
 #[derive(Debug, Clone)]
@@ -75,6 +79,12 @@ pub struct MtmdContextParams {
     pub n_threads: i32,
     /// Media marker string used to identify media positions in text
     pub media_marker: CString,
+    /// Maximum number of output tokens in an MTMD batch.
+    pub batch_max_tokens: i32,
+    /// Optional low-level progress callback for model loading.
+    pub progress_callback: llama_cpp_sys_2::mtmd_progress_callback,
+    /// Opaque user data passed to [`Self::progress_callback`].
+    pub progress_callback_user_data: *mut c_void,
 }
 
 impl Default for MtmdContextParams {
@@ -91,12 +101,18 @@ impl From<&MtmdContextParams> for llama_cpp_sys_2::mtmd_context_params {
             print_timings,
             n_threads,
             media_marker,
+            batch_max_tokens,
+            progress_callback,
+            progress_callback_user_data,
         } = params;
 
         context.use_gpu = *use_gpu;
         context.print_timings = *print_timings;
         context.n_threads = *n_threads;
         context.media_marker = media_marker.as_ptr();
+        context.batch_max_tokens = *batch_max_tokens;
+        context.progress_callback = *progress_callback;
+        context.progress_callback_user_data = *progress_callback_user_data;
 
         context
     }
@@ -109,6 +125,9 @@ impl From<llama_cpp_sys_2::mtmd_context_params> for MtmdContextParams {
             print_timings: params.print_timings,
             n_threads: params.n_threads,
             media_marker: unsafe { CStr::from_ptr(params.media_marker) }.to_owned(),
+            batch_max_tokens: params.batch_max_tokens,
+            progress_callback: params.progress_callback,
+            progress_callback_user_data: params.progress_callback_user_data,
         }
     }
 }
@@ -306,7 +325,7 @@ impl MtmdContext {
     ///
     /// This function processes image or audio chunks by encoding them into
     /// embeddings that can be used by the language model. The embeddings
-    /// can be retrieved using `get_output_embeddings()`.
+    /// can be retrieved using [`Self::output_embeddings`].
     ///
     /// # Arguments
     ///
@@ -330,11 +349,174 @@ impl MtmdContext {
             Err(MtmdEncodeError::EncodeFailure(result))
         }
     }
+
+    /// Get embeddings from the most recent single-chunk encode operation.
+    ///
+    /// The returned slice has `model.n_embd_inp() * chunk.n_tokens()` floats.
+    ///
+    /// # Errors
+    ///
+    /// Returns `MtmdEncodeError::NullEmbeddings` if no output embedding buffer is available.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `model.n_embd_inp()` is negative or cannot fit in a `usize`.
+    pub fn output_embeddings<'a>(
+        &'a self,
+        model: &LlamaModel,
+        chunk: &MtmdInputChunk,
+    ) -> Result<&'a [f32], MtmdEncodeError> {
+        let ptr = unsafe { llama_cpp_sys_2::mtmd_get_output_embd(self.context.as_ptr()) };
+        if ptr.is_null() {
+            return Err(MtmdEncodeError::NullEmbeddings);
+        }
+        let n_embd = usize::try_from(model.n_embd_inp()).expect("n_embd_inp fits into a usize");
+        let len = n_embd * chunk.n_tokens();
+        Ok(unsafe { slice::from_raw_parts(ptr, len) })
+    }
+
+    /// Decode a media chunk whose embeddings have already been encoded.
+    ///
+    /// This is the lower-level decode half of [`Self::encode_chunk`]. It is useful when callers
+    /// need direct control over the encode/decode split or want to decode embeddings returned by
+    /// [`Self::output_embeddings`] or [`MtmdBatch::output_embeddings`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `MtmdEvalError::EvalFailure` if llama.cpp rejects the chunk or decoding fails.
+    pub fn decode_image_chunk(
+        &self,
+        llama_ctx: &LlamaContext,
+        chunk: &MtmdInputChunk,
+        embeddings: &[f32],
+        n_past: llama_cpp_sys_2::llama_pos,
+        seq_id: llama_cpp_sys_2::llama_seq_id,
+        n_batch: i32,
+    ) -> Result<llama_cpp_sys_2::llama_pos, MtmdEvalError> {
+        let mut new_n_past = 0;
+        let result = unsafe {
+            llama_cpp_sys_2::mtmd_helper_decode_image_chunk(
+                self.context.as_ptr(),
+                llama_ctx.context.as_ptr(),
+                chunk.chunk.as_ptr(),
+                embeddings.as_ptr().cast_mut(),
+                n_past,
+                seq_id,
+                n_batch,
+                &raw mut new_n_past,
+                None,
+                std::ptr::null_mut(),
+            )
+        };
+
+        if result == 0 {
+            Ok(new_n_past)
+        } else {
+            Err(MtmdEvalError::EvalFailure(result))
+        }
+    }
+
+    /// Create a new MTMD media batch for this context.
+    ///
+    /// The batch can collect media chunks and encode them together when supported by the model.
+    ///
+    /// # Errors
+    ///
+    /// Returns `MtmdBatchError::NullResult` if the underlying C API fails to allocate a batch.
+    pub fn batch(&self) -> Result<MtmdBatch<'_>, MtmdBatchError> {
+        let batch = unsafe { llama_cpp_sys_2::mtmd_batch_init(self.context.as_ptr()) };
+        let batch = NonNull::new(batch).ok_or(MtmdBatchError::NullResult)?;
+        Ok(MtmdBatch {
+            batch,
+            _ctx: PhantomData,
+        })
+    }
 }
 
 impl Drop for MtmdContext {
     fn drop(&mut self) {
         unsafe { llama_cpp_sys_2::mtmd_free(self.context.as_ptr()) }
+    }
+}
+
+/// Safe wrapper around `mtmd_batch`.
+///
+/// The batch borrows the MTMD context that created it. Chunks added to a batch are
+/// not owned by the batch and must remain valid until encoding completes.
+#[derive(Debug)]
+pub struct MtmdBatch<'ctx> {
+    batch: NonNull<llama_cpp_sys_2::mtmd_batch>,
+    _ctx: PhantomData<&'ctx MtmdContext>,
+}
+
+impl MtmdBatch<'_> {
+    /// Add a media chunk to the batch.
+    ///
+    /// Text chunks are rejected by llama.cpp.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MtmdBatchAddError`] describing the llama.cpp rejection reason.
+    pub fn add_chunk(&mut self, chunk: &MtmdInputChunk) -> Result<(), MtmdBatchAddError> {
+        let result = unsafe {
+            llama_cpp_sys_2::mtmd_batch_add_chunk(self.batch.as_ptr(), chunk.chunk.as_ptr())
+        };
+
+        match result {
+            0 => Ok(()),
+            1 => Err(MtmdBatchAddError::Generic),
+            2 => Err(MtmdBatchAddError::TooLarge),
+            3 => Err(MtmdBatchAddError::Incompatible),
+            code => Err(MtmdBatchAddError::Unknown(code)),
+        }
+    }
+
+    /// Encode all chunks currently in the batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns `MtmdEncodeError::EncodeFailure` if llama.cpp reports an encode error.
+    pub fn encode(&mut self) -> Result<(), MtmdEncodeError> {
+        let result = unsafe { llama_cpp_sys_2::mtmd_batch_encode(self.batch.as_ptr()) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(MtmdEncodeError::EncodeFailure(result))
+        }
+    }
+
+    /// Get embeddings for a chunk encoded in this batch.
+    ///
+    /// The returned slice has `model.n_embd_inp() * chunk.n_tokens()` floats.
+    ///
+    /// # Errors
+    ///
+    /// Returns `MtmdEncodeError::NullEmbeddings` if the chunk is not present in the encoded batch
+    /// or if the batch has not been encoded successfully.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `model.n_embd_inp()` is negative or cannot fit in a `usize`.
+    pub fn output_embeddings<'a>(
+        &'a self,
+        model: &LlamaModel,
+        chunk: &MtmdInputChunk,
+    ) -> Result<&'a [f32], MtmdEncodeError> {
+        let ptr = unsafe {
+            llama_cpp_sys_2::mtmd_batch_get_output_embd(self.batch.as_ptr(), chunk.chunk.as_ptr())
+        };
+        if ptr.is_null() {
+            return Err(MtmdEncodeError::NullEmbeddings);
+        }
+        let n_embd = usize::try_from(model.n_embd_inp()).expect("n_embd_inp fits into a usize");
+        let len = n_embd * chunk.n_tokens();
+        Ok(unsafe { slice::from_raw_parts(ptr, len) })
+    }
+}
+
+impl Drop for MtmdBatch<'_> {
+    fn drop(&mut self) {
+        unsafe { llama_cpp_sys_2::mtmd_batch_free(self.batch.as_ptr()) }
     }
 }
 
@@ -692,9 +874,9 @@ impl MtmdInputChunks {
     ///
     /// This helper function automatically:
     /// 1. Runs `llama_decode()` on text chunks
-    /// 2. Runs `mtmd_encode()` on image chunks, then `mtmd_get_output_embd()` and then `llama_decode()`
+    /// 2. Runs `mtmd_encode_chunk()` on image chunks, then `mtmd_get_output_embd()` and then `llama_decode()`
     ///
-    /// If any of the `mtmd_encode()` or `llama_decode()` calls return non-zero, the function
+    /// If any of the `mtmd_encode_chunk()` or `llama_decode()` calls return non-zero, the function
     /// stops and forwards the error.
     ///
     /// # Arguments
@@ -957,6 +1139,34 @@ pub enum MtmdEncodeError {
     /// Encode operation failed
     #[error("Encode failed with code: {0}")]
     EncodeFailure(i32),
+    /// Output embeddings were not available.
+    #[error("Output embeddings are not available")]
+    NullEmbeddings,
+}
+
+/// Errors that can occur when creating an MTMD batch.
+#[derive(thiserror::Error, Debug)]
+pub enum MtmdBatchError {
+    /// Batch creation returned null
+    #[error("MTMD batch creation returned null")]
+    NullResult,
+}
+
+/// Errors that can occur when adding a chunk to an MTMD batch.
+#[derive(thiserror::Error, Debug)]
+pub enum MtmdBatchAddError {
+    /// A generic error occurred.
+    #[error("MTMD batch add failed")]
+    Generic,
+    /// The chunk is too large for the batch.
+    #[error("MTMD batch add failed because the chunk is too large")]
+    TooLarge,
+    /// The chunk cannot be batched with chunks already in the batch.
+    #[error("MTMD batch add failed because the chunk is incompatible with the batch")]
+    Incompatible,
+    /// Unknown error code.
+    #[error("MTMD batch add failed with unknown code: {0}")]
+    Unknown(i32),
 }
 
 /// Errors that can occur during evaluation
