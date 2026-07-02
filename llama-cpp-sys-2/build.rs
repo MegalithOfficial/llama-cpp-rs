@@ -336,9 +336,9 @@ fn main() {
         .allowlist_type("llama_.*")
         .prepend_enum_name(false);
 
-    // The `llama_rs_*` symbols are emitted by `wrapper_common.cpp`, which is
-    // only compiled (and only has its header included from `wrapper.h`) when
-    // the `common` feature is enabled.
+    // The `llama_rs_*` symbols are emitted by `wrapper_common.cpp` /
+    // `wrapper_oai.cpp`, which are only compiled (and only have their headers
+    // included from `wrapper.h`) when the `common` feature is enabled.
     if cfg!(feature = "common") {
         bindings_builder = bindings_builder
             .clang_arg("-DLLAMA_RS_BUILD_COMMON")
@@ -553,6 +553,8 @@ fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=wrapper_common.h");
     println!("cargo:rerun-if-changed=wrapper_common.cpp");
+    println!("cargo:rerun-if-changed=wrapper_oai.h");
+    println!("cargo:rerun-if-changed=wrapper_oai.cpp");
     println!("cargo:rerun-if-changed=wrapper_utils.h");
     println!("cargo:rerun-if-changed=wrapper_mtmd.h");
 
@@ -563,6 +565,7 @@ fn main() {
         common_wrapper_build
             .cpp(true)
             .file("wrapper_common.cpp")
+            .file("wrapper_oai.cpp")
             .include(&llama_src)
             .include(llama_src.join("common"))
             .include(llama_src.join("include"))
