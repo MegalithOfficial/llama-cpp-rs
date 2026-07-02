@@ -441,6 +441,9 @@ impl<'model> LlamaContext<'model> {
 
 impl Drop for LlamaContext<'_> {
     fn drop(&mut self) {
-        unsafe { llama_cpp_sys_2::llama_free(self.context.as_ptr()) }
+        unsafe {
+            llama_cpp_sys_2::llama_synchronize(self.context.as_ptr());
+            llama_cpp_sys_2::llama_free(self.context.as_ptr());
+        }
     }
 }
