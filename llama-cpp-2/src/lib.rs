@@ -33,7 +33,6 @@ mod log;
 pub mod model;
 #[cfg(feature = "mtmd")]
 pub mod mtmd;
-pub mod openai;
 pub mod sampling;
 pub mod timing;
 pub mod token;
@@ -41,6 +40,7 @@ pub mod token_type;
 
 pub use crate::context::session::LlamaStateSeqFlags;
 
+#[cfg(feature = "common")]
 pub(crate) fn status_is_ok(status: llama_cpp_sys_2::llama_rs_status) -> bool {
     status == llama_cpp_sys_2::LLAMA_RS_STATUS_OK
 }
@@ -84,9 +84,11 @@ pub enum LlamaCppError {
     #[error("Max devices exceeded. Max devices is {0}")]
     MaxDevicesExceeded(usize),
     /// Failed to convert JSON schema to grammar.
+    #[cfg(feature = "common")]
     #[error("JsonSchemaToGrammarError: {0}")]
     JsonSchemaToGrammarError(String),
     /// There was an error fitting model parameters to available memory.
+    #[cfg(feature = "common")]
     #[error("{0}")]
     FitError(#[from] crate::model::params::FitError),
 }
@@ -307,6 +309,7 @@ pub fn mlock_supported() -> bool {
 }
 
 /// Convert a JSON schema string into a llama.cpp grammar string.
+#[cfg(feature = "common")]
 pub fn json_schema_to_grammar(schema_json: &str) -> Result<String> {
     let schema_cstr = CString::new(schema_json)
         .map_err(|err| LlamaCppError::JsonSchemaToGrammarError(err.to_string()))?;
@@ -332,7 +335,7 @@ pub fn json_schema_to_grammar(schema_json: &str) -> Result<String> {
     result
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "common"))]
 mod tests {
     use super::json_schema_to_grammar;
 
@@ -398,26 +401,6 @@ pub enum ApplyChatTemplateError {
     #[error("{0}")]
     FromUtf8Error(#[from] FromUtf8Error),
     /// llama.cpp returned a null pointer for the template result.
-    #[error("null result from llama.cpp")]
-    NullResult,
-    /// llama.cpp returned an error code.
-    #[error("ffi error {0}")]
-    FfiError(i32),
-    /// invalid grammar trigger data returned by llama.cpp.
-    #[error("invalid grammar trigger data")]
-    InvalidGrammarTriggerType,
-}
-
-/// Failed to parse a chat response.
-#[derive(Debug, thiserror::Error)]
-pub enum ChatParseError {
-    /// the string contained a null byte and thus could not be converted to a c string.
-    #[error("{0}")]
-    NulError(#[from] NulError),
-    /// the string could not be converted to utf8.
-    #[error("{0}")]
-    Utf8Error(#[from] FromUtf8Error),
-    /// llama.cpp returned a null pointer for the parse result.
     #[error("null result from llama.cpp")]
     NullResult,
     /// llama.cpp returned an error code.

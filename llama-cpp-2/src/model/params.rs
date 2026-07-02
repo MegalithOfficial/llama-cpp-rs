@@ -11,6 +11,7 @@ use std::ptr::null;
 pub mod kv_overrides;
 
 /// Result of [`LlamaModelParams::fit_params`], containing the fitted context size.
+#[cfg(feature = "common")]
 #[derive(Debug, Clone)]
 pub struct FitResult {
     /// The context size after fitting (may have been reduced from the requested value).
@@ -18,6 +19,7 @@ pub struct FitResult {
 }
 
 /// Error returned by [`LlamaModelParams::fit_params`].
+#[cfg(feature = "common")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum FitError {
     /// Could not find allocations that are projected to fit available memory.
@@ -286,10 +288,11 @@ impl LlamaModelParams {
     }
 }
 
+#[cfg(feature = "common")]
 impl LlamaModelParams {
     /// Automatically fit model parameters to available device memory.
     ///
-    /// Wraps llama.cpp's `llama_params_fit`, which determines optimal `n_gpu_layers`,
+    /// Wraps llama.cpp's `common_fit_params` (libcommon), which determines optimal `n_gpu_layers`,
     /// `tensor_split`, and `tensor_buft_overrides` based on available VRAM. On success
     /// the model and context params are updated in place.
     ///
@@ -365,6 +368,7 @@ impl LlamaModelParams {
             )
         };
 
+        // llama_rs_fit_params returns common_params_fit_status: 0 = success, 1 = failure, 2 = error.
         match status {
             llama_cpp_sys_2::LLAMA_RS_PARAMS_FIT_STATUS_SUCCESS => {}
             llama_cpp_sys_2::LLAMA_RS_PARAMS_FIT_STATUS_FAILURE => return Err(FitError::Failure),

@@ -69,6 +69,12 @@ pub struct MtmdCliParams {
     /// Media marker. If not provided, the default marker will be used.
     #[arg(long = "marker", value_name = "TEXT")]
     pub media_marker: Option<String>,
+    /// Minimum number of tokens used to represent an image (-1 for model default).
+    #[arg(long = "image-min-tokens", value_name = "N", default_value = "-1")]
+    pub image_min_tokens: i32,
+    /// Maximum number of tokens used to represent an image (-1 for model default).
+    #[arg(long = "image-max-tokens", value_name = "N", default_value = "-1")]
+    pub image_max_tokens: i32,
 }
 
 /// State of the MTMD CLI application.
@@ -134,7 +140,7 @@ impl<'a> MtmdCliContext<'a> {
     /// Loads media (image or audio) from the specified file path
     /// # Errors
     pub fn load_media(&mut self, path: &str) -> Result<(), MtmdBitmapError> {
-        let bitmap = MtmdBitmap::from_file(&self.mtmd_ctx, path)?;
+        let bitmap = MtmdBitmap::from_file(&self.mtmd_ctx, path, false)?;
         self.bitmaps.push(bitmap);
         Ok(())
     }

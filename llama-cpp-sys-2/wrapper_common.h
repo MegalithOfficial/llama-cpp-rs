@@ -7,6 +7,7 @@
 
 struct llama_model;
 struct llama_sampler;
+struct llama_rs_mtp_speculative;
 struct llama_vocab;
 
 struct llama_rs_grammar_trigger {

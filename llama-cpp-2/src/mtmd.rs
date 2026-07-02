@@ -632,6 +632,9 @@ impl MtmdBitmap {
     ///
     /// * `ctx` - MTMD context for processing
     /// * `path` - Path to the image or audio file
+    /// * `placeholder` - If `true`, build a data-less bitmap (dimensions/length only, with no
+    ///   decoded pixels or audio samples) — useful for counting tokens without loading the media.
+    ///   If `false`, decode and load the actual data.
     ///
     /// # Returns
     ///
@@ -643,7 +646,11 @@ impl MtmdBitmap {
     /// * `NullResult` - File could not be loaded or processed
     ///
     /// This function is thread-safe.
-    pub fn from_file(ctx: &MtmdContext, path: &str) -> Result<Self, MtmdBitmapError> {
+    pub fn from_file(
+        ctx: &MtmdContext,
+        path: &str,
+        placeholder: bool,
+    ) -> Result<Self, MtmdBitmapError> {
         let path_cstr = CString::new(path)?;
         let wrapper = unsafe {
             llama_cpp_sys_2::mtmd_helper_bitmap_init_from_file(
@@ -672,6 +679,9 @@ impl MtmdBitmap {
     ///
     /// * `ctx` - MTMD context for processing
     /// * `data` - Buffer containing the file data
+    /// * `placeholder` - If `true`, build a data-less bitmap (dimensions/length only, with no
+    ///   decoded pixels or audio samples) — useful for counting tokens without loading the media.
+    ///   If `false`, decode and load the actual data.
     ///
     /// # Returns
     ///
