@@ -47,6 +47,23 @@ pub(crate) fn status_is_ok(status: llama_cpp_sys_2::llama_rs_status) -> bool {
     status == llama_cpp_sys_2::LLAMA_RS_STATUS_OK
 }
 
+#[cfg(feature = "common")]
+pub(crate) fn status_error_message(status: llama_cpp_sys_2::llama_rs_status) -> Option<String> {
+    if status != llama_cpp_sys_2::LLAMA_RS_STATUS_EXCEPTION {
+        return None;
+    }
+    let ptr = unsafe { llama_cpp_sys_2::llama_rs_last_error() };
+    if ptr.is_null() {
+        return None;
+    }
+    let message = unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy();
+    if message.is_empty() {
+        None
+    } else {
+        Some(message.into_owned())
+    }
+}
+
 /// A failable result from a llama.cpp function.
 pub type Result<T> = std::result::Result<T, LlamaCppError>;
 
@@ -322,10 +339,12 @@ pub fn json_schema_to_grammar(schema_json: &str) -> Result<String> {
 
     let result = {
         if !status_is_ok(rc) || out.is_null() {
-            return Err(LlamaCppError::JsonSchemaToGrammarError(format!(
-                "ffi error {}",
-                rc
-            )));
+            return Err(LlamaCppError::JsonSchemaToGrammarError(
+                match status_error_message(rc) {
+                    Some(message) => format!("ffi error {rc}: {message}"),
+                    None => format!("ffi error {rc}"),
+                },
+            ));
         }
         let grammar_bytes = unsafe { CStr::from_ptr(out) }.to_bytes().to_vec();
         let grammar = String::from_utf8(grammar_bytes)
@@ -408,6 +427,10 @@ pub enum ApplyChatTemplateError {
     /// llama.cpp returned an error code.
     #[error("ffi error {0}")]
     FfiError(i32),
+    /// llama.cpp threw an exception with a message.
+    #[cfg(feature = "common")]
+    #[error("ffi error {0}: {1}")]
+    FfiException(i32, String),
     /// invalid grammar trigger data returned by llama.cpp.
     #[cfg(feature = "common")]
     #[error("invalid grammar trigger data")]
@@ -430,6 +453,9 @@ pub enum ChatParseError {
     /// llama.cpp returned an error code.
     #[error("ffi error {0}")]
     FfiError(i32),
+    /// llama.cpp threw an exception with a message.
+    #[error("ffi error {0}: {1}")]
+    FfiException(i32, String),
 }
 
 /// Failed to accept a token in a sampler.
@@ -438,6 +464,10 @@ pub enum SamplerAcceptError {
     /// llama.cpp returned an error code.
     #[error("ffi error {0}")]
     FfiError(i32),
+    /// llama.cpp threw an exception with a message.
+    #[cfg(feature = "common")]
+    #[error("ffi error {0}: {1}")]
+    FfiException(i32, String),
 }
 
 /// Get the time in microseconds according to ggml

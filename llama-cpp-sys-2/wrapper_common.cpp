@@ -65,6 +65,16 @@ extern "C" void llama_rs_chat_template_result_free(struct llama_rs_chat_template
     result->additional_stops_count = 0;
 }
 
+static thread_local std::string llama_rs_last_error_storage;
+
+extern "C" const char * llama_rs_last_error(void) {
+    return llama_rs_last_error_storage.c_str();
+}
+
+void llama_rs_set_last_error(const std::string & message) {
+    llama_rs_last_error_storage = message;
+}
+
 extern "C" llama_rs_status llama_rs_json_schema_to_grammar(
     const char * schema_json,
     bool force_gbnf,
@@ -79,7 +89,8 @@ extern "C" llama_rs_status llama_rs_json_schema_to_grammar(
         const auto grammar = json_schema_to_grammar(schema, force_gbnf);
         *out_grammar = llama_rs_dup_string(grammar);
         return *out_grammar ? LLAMA_RS_STATUS_OK : LLAMA_RS_STATUS_ALLOCATION_FAILED;
-    } catch (const std::exception &) {
+    } catch (const std::exception & e) {
+        llama_rs_set_last_error(e.what());
         return LLAMA_RS_STATUS_EXCEPTION;
     }
 }
@@ -165,9 +176,11 @@ extern "C" llama_rs_status llama_rs_sampler_accept(struct llama_sampler * sample
     try {
         llama_sampler_accept(sampler, token);
         return LLAMA_RS_STATUS_OK;
-    } catch (const std::exception &) {
+    } catch (const std::exception & e) {
+        llama_rs_set_last_error(e.what());
         return LLAMA_RS_STATUS_EXCEPTION;
     } catch (...) {
+        llama_rs_set_last_error("unknown exception");
         return LLAMA_RS_STATUS_EXCEPTION;
     }
 }

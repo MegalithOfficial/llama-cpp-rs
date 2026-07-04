@@ -68,7 +68,10 @@ impl ChatParseStateOaicompat {
 
         let result = {
             if !status_is_ok(rc) {
-                return Err(ChatParseError::FfiError(rc));
+                return Err(match crate::status_error_message(rc) {
+                    Some(message) => ChatParseError::FfiException(rc, message),
+                    None => ChatParseError::FfiError(rc),
+                });
             }
             if out_diffs_count > 0 && out_diffs.is_null() {
                 return Err(ChatParseError::NullResult);
@@ -88,7 +91,10 @@ impl ChatParseStateOaicompat {
                     if !out_json.is_null() {
                         unsafe { llama_cpp_sys_2::llama_rs_string_free(out_json) };
                     }
-                    return Err(ChatParseError::FfiError(rc));
+                    return Err(match crate::status_error_message(rc) {
+                        Some(message) => ChatParseError::FfiException(rc, message),
+                        None => ChatParseError::FfiError(rc),
+                    });
                 }
                 if out_json.is_null() {
                     return Err(ChatParseError::NullResult);

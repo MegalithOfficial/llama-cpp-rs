@@ -80,7 +80,10 @@ impl LlamaSampler {
         if status_is_ok(sampler_result) {
             Ok(())
         } else {
-            Err(SamplerAcceptError::FfiError(sampler_result))
+            Err(match crate::status_error_message(sampler_result) {
+                Some(message) => SamplerAcceptError::FfiException(sampler_result, message),
+                None => SamplerAcceptError::FfiError(sampler_result),
+            })
         }
     }
 

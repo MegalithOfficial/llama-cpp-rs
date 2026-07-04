@@ -1031,7 +1031,10 @@ impl LlamaModel {
 
         let result = (|| {
             if !status_is_ok(rc) {
-                return Err(ApplyChatTemplateError::FfiError(rc));
+                return Err(match crate::status_error_message(rc) {
+                    Some(message) => ApplyChatTemplateError::FfiException(rc, message),
+                    None => ApplyChatTemplateError::FfiError(rc),
+                });
             }
             if raw_result.prompt.is_null() {
                 return Err(ApplyChatTemplateError::NullResult);
@@ -1237,7 +1240,10 @@ impl LlamaModel {
 
         let result = (|| {
             if !status_is_ok(rc) {
-                return Err(ApplyChatTemplateError::FfiError(rc));
+                return Err(match crate::status_error_message(rc) {
+                    Some(message) => ApplyChatTemplateError::FfiException(rc, message),
+                    None => ApplyChatTemplateError::FfiError(rc),
+                });
             }
             if raw_result.prompt.is_null() {
                 return Err(ApplyChatTemplateError::NullResult);
@@ -1407,7 +1413,10 @@ impl ChatTemplateResult {
 
         let result = (|| {
             if !status_is_ok(rc) {
-                return Err(ChatParseError::FfiError(rc));
+                return Err(match crate::status_error_message(rc) {
+                    Some(message) => ChatParseError::FfiException(rc, message),
+                    None => ChatParseError::FfiError(rc),
+                });
             }
             if out_json.is_null() {
                 return Err(ChatParseError::NullResult);

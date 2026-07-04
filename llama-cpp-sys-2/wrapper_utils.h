@@ -11,6 +11,16 @@ typedef enum llama_rs_status {
 } llama_rs_status;
 
 #ifdef __cplusplus
+extern "C" {
+#endif
+
+const char * llama_rs_last_error(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
 
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +28,8 @@ typedef enum llama_rs_status {
 #include <vector>
 
 #include "llama.cpp/common/common.h"
+
+void llama_rs_set_last_error(const std::string & message);
 
 static inline char * llama_rs_dup_string(const std::string & value) {
     char * buffer = static_cast<char *>(std::malloc(value.size() + 1));
