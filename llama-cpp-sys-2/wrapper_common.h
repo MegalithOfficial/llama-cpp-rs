@@ -85,6 +85,8 @@ enum llama_rs_params_fit_status llama_rs_params_fit(
 
 void llama_rs_memory_breakdown_print(const struct llama_context * ctx);
 
+size_t llama_rs_context_memory_size(const struct llama_context * ctx);
+
 void llama_rs_set_embeddings_nextn(struct llama_context * ctx, bool value, bool masked);
 
 float * llama_rs_get_embeddings_nextn(struct llama_context * ctx);

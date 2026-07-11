@@ -438,6 +438,13 @@ impl<'model> LlamaContext<'model> {
     pub fn print_memory_breakdown(&self) {
         unsafe { llama_cpp_sys_2::llama_rs_memory_breakdown_print(self.context.as_ptr()) }
     }
+
+    /// Return the bytes retained by this context's persistent and compute buffers.
+    #[cfg(feature = "common")]
+    #[must_use]
+    pub fn allocated_memory_size(&self) -> usize {
+        unsafe { llama_cpp_sys_2::llama_rs_context_memory_size(self.context.as_ptr()) }
+    }
 }
 
 impl Drop for LlamaContext<'_> {

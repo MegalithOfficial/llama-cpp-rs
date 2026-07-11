@@ -224,6 +224,18 @@ extern "C" void llama_rs_memory_breakdown_print(const struct llama_context * ctx
     common_memory_breakdown_print(ctx);
 }
 
+extern "C" size_t llama_rs_context_memory_size(const struct llama_context * ctx) {
+    if (!ctx) {
+        return 0;
+    }
+    size_t total = 0;
+    for (const auto & [buffer_type, memory] : llama_get_memory_breakdown(ctx)) {
+        (void) buffer_type;
+        total += memory.context + memory.compute;
+    }
+    return total;
+}
+
 extern "C" void llama_rs_set_embeddings_nextn(struct llama_context * ctx, bool value, bool masked) {
     if (!ctx) {
         return;
