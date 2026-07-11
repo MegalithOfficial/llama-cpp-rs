@@ -168,6 +168,22 @@ impl Debug for LlamaModelParams {
 }
 
 impl LlamaModelParams {
+    /// Borrow the underlying llama.cpp model parameters.
+    ///
+    /// Pointer fields in the returned structure may reference buffers owned by
+    /// this value, so callers must keep `self` alive for the entire native call
+    /// that consumes the parameters.
+    #[must_use]
+    pub fn as_raw(&self) -> &llama_cpp_sys_2::llama_model_params {
+        &self.params
+    }
+
+    /// Return the tensor split produced by parameter fitting.
+    #[must_use]
+    pub fn tensor_split(&self) -> &[f32] {
+        &self.tensor_split
+    }
+
     /// See [`KvOverrides`]
     ///
     /// # Examples
