@@ -87,6 +87,77 @@ pub struct MtmdContextParams {
     pub progress_callback_user_data: *mut c_void,
 }
 
+/// Memory required by an MTMD projector on one backend device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MtmdMemoryUsage {
+    /// Backend device name reported by ggml.
+    pub device_name: String,
+    /// Model and compute bytes required on this device.
+    pub bytes: usize,
+    /// Whether this entry belongs to host memory.
+    pub host: bool,
+}
+
+/// Measure MTMD model and compute memory without allocating the buffers.
+///
+/// # Errors
+///
+/// Returns an error when the path contains a null byte or llama.cpp cannot
+/// inspect the projector.
+pub fn measure_memory_usage(
+    mmproj_path: &str,
+    params: &MtmdContextParams,
+) -> Result<Vec<MtmdMemoryUsage>, MtmdMemoryUsageError> {
+    let path = CString::new(mmproj_path)?;
+    let raw_params = llama_cpp_sys_2::mtmd_context_params::from(params);
+    let count = unsafe {
+        llama_cpp_sys_2::mtmd_rs_get_memory_usage(
+            path.as_ptr(),
+            raw_params,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if count == 0 {
+        return Err(MtmdMemoryUsageError::ProbeFailed);
+    }
+
+    let mut raw = vec![
+        llama_cpp_sys_2::mtmd_rs_memory_usage {
+            device_name: std::ptr::null(),
+            bytes: 0,
+            host: false,
+        };
+        count
+    ];
+    let measured = unsafe {
+        llama_cpp_sys_2::mtmd_rs_get_memory_usage(
+            path.as_ptr(),
+            raw_params,
+            raw.as_mut_ptr(),
+            raw.len(),
+        )
+    };
+    if measured != count {
+        return Err(MtmdMemoryUsageError::ProbeFailed);
+    }
+
+    raw.into_iter()
+        .map(|entry| {
+            if entry.device_name.is_null() {
+                return Err(MtmdMemoryUsageError::ProbeFailed);
+            }
+            Ok(MtmdMemoryUsage {
+                device_name: unsafe { CStr::from_ptr(entry.device_name) }
+                    .to_string_lossy()
+                    .into_owned(),
+                bytes: entry.bytes,
+                host: entry.host,
+            })
+        })
+        .collect()
+}
+
 impl Default for MtmdContextParams {
     fn default() -> Self {
         unsafe { llama_cpp_sys_2::mtmd_context_params_default() }.into()
@@ -1094,6 +1165,17 @@ pub enum MtmdInitError {
     /// MTMD context initialization returned null
     #[error("MTMD context initialization returned null")]
     NullResult,
+}
+
+/// Errors returned by [`measure_memory_usage`].
+#[derive(thiserror::Error, Debug)]
+pub enum MtmdMemoryUsageError {
+    /// The projector path contains an interior null byte.
+    #[error("invalid projector path")]
+    CStringError(#[from] std::ffi::NulError),
+    /// llama.cpp could not inspect the projector.
+    #[error("failed to measure MTMD memory usage")]
+    ProbeFailed,
 }
 
 /// Errors that can occur when working with MTMD bitmaps

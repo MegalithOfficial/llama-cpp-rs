@@ -15,6 +15,7 @@ include = [
     "wrapper_oai.cpp",
     "wrapper_utils.h",
     "wrapper_mtmd.h",
+    "wrapper_mtmd.cpp",
     "build.rs",
     "/src",
 

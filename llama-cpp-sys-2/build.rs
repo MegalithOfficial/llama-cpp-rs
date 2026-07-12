@@ -557,6 +557,7 @@ fn main() {
     println!("cargo:rerun-if-changed=wrapper_oai.cpp");
     println!("cargo:rerun-if-changed=wrapper_utils.h");
     println!("cargo:rerun-if-changed=wrapper_mtmd.h");
+    println!("cargo:rerun-if-changed=wrapper_mtmd.cpp");
 
     debug_log!("Bindings Created");
 
@@ -989,6 +990,7 @@ fn main() {
         let mut mtmd_build = cc::Build::new();
         mtmd_build
             .cpp(true)
+            .file("wrapper_mtmd.cpp")
             .include(&mtmd_src)
             .include(&llama_src)
             .include(llama_src.join("include"))
