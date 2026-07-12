@@ -83,6 +83,8 @@ enum llama_rs_params_fit_status llama_rs_params_fit(
     uint32_t n_ctx_min,
     enum ggml_log_level log_level);
 
+size_t llama_rs_params_fit_default_margin(void);
+
 void llama_rs_memory_breakdown_print(const struct llama_context * ctx);
 
 size_t llama_rs_context_memory_size(const struct llama_context * ctx);

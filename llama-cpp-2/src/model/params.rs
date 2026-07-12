@@ -168,6 +168,12 @@ impl Debug for LlamaModelParams {
 }
 
 impl LlamaModelParams {
+    /// The per-device free-memory target used by llama.cpp automatic fitting.
+    #[must_use]
+    pub fn default_fit_margin() -> usize {
+        unsafe { llama_cpp_sys_2::llama_rs_params_fit_default_margin() }
+    }
+
     /// Borrow the underlying llama.cpp model parameters.
     ///
     /// Pointer fields in the returned structure may reference buffers owned by
@@ -613,7 +619,12 @@ impl Default for LlamaModelParams {
 
 #[cfg(test)]
 mod tests {
-    use super::LlamaSplitMode;
+    use super::{LlamaModelParams, LlamaSplitMode};
+
+    #[test]
+    fn default_fit_margin_comes_from_common_params() {
+        assert_eq!(LlamaModelParams::default_fit_margin(), 1024 * 1024 * 1024);
+    }
 
     #[test]
     fn tensor_split_mode_round_trips() {

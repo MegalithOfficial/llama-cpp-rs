@@ -217,6 +217,11 @@ extern "C" enum llama_rs_params_fit_status llama_rs_params_fit(
     }
 }
 
+extern "C" size_t llama_rs_params_fit_default_margin(void) {
+    const common_params params{};
+    return params.fit_params_target.empty() ? 0 : params.fit_params_target.front();
+}
+
 extern "C" void llama_rs_memory_breakdown_print(const struct llama_context * ctx) {
     if (!ctx) {
         return;
