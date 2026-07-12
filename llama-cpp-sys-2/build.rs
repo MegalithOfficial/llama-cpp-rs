@@ -697,6 +697,7 @@ fn main() {
         "BUILD_SHARED_LIBS",
         if build_shared_libs { "ON" } else { "OFF" },
     );
+    config.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
 
     if matches!(target_os, TargetOs::Apple(_)) {
         config.define("GGML_BLAS", "OFF");
