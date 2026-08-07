@@ -364,6 +364,7 @@ impl MtmdContext {
         let text_cstring = CString::new(text.text)?;
         let input_text = llama_cpp_sys_2::mtmd_input_text {
             text: text_cstring.as_ptr(),
+            text_len: text_cstring.as_bytes().len(),
             add_special: text.add_special,
             parse_special: text.parse_special,
         };
@@ -723,11 +724,14 @@ impl MtmdBitmap {
         placeholder: bool,
     ) -> Result<Self, MtmdBitmapError> {
         let path_cstr = CString::new(path)?;
+        // This helper now returns a wrapper struct (bitmap + an optional video
+        // decoding context) instead of a bare pointer. Keep that context alive
+        // for as long as the bitmap when video decoding supplies one.
         let wrapper = unsafe {
             llama_cpp_sys_2::mtmd_helper_bitmap_init_from_file(
                 ctx.context.as_ptr(),
                 path_cstr.as_ptr(),
-                false,
+                placeholder,
             )
         };
 
@@ -764,12 +768,21 @@ impl MtmdBitmap {
     ///
     /// This function is thread-safe.
     pub fn from_buffer(ctx: &MtmdContext, data: &[u8]) -> Result<Self, MtmdBitmapError> {
+        Self::from_buffer_with_placeholder(ctx, data, false)
+    }
+
+    /// Create a bitmap from encoded media with optional placeholder-only decoding.
+    pub fn from_buffer_with_placeholder(
+        ctx: &MtmdContext,
+        data: &[u8],
+        placeholder: bool,
+    ) -> Result<Self, MtmdBitmapError> {
         let wrapper = unsafe {
             llama_cpp_sys_2::mtmd_helper_bitmap_init_from_buf(
                 ctx.context.as_ptr(),
                 data.as_ptr(),
                 data.len(),
-                false,
+                placeholder,
             )
         };
 
