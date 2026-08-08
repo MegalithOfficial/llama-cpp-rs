@@ -111,7 +111,8 @@ fn main() -> Result<()> {
         }
         #[cfg(not(any(feature = "cuda", feature = "vulkan")))]
         LlamaModelParams::default()
-    };
+    }
+    .with_load_mtp(true);
 
     let model = LlamaModel::load_from_file(&backend, &model_path, &model_params)
         .with_context(|| format!("unable to load model from {}", model_path.display()))?;

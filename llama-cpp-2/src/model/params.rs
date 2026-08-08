@@ -632,6 +632,27 @@ impl LlamaModelParams {
         self.params.no_alloc
     }
 
+    /// Set `load_mtp`
+    ///
+    /// Whether to load the model's multi-token-prediction layers. This defaults
+    /// to **false**, and architectures that carry MTP tensors (Qwen3-Next,
+    /// Qwen3.5, DeepSeek V3.2/V4, GLM, MiMo, ...) skip them entirely when it is
+    /// unset. Turn it on before loading a model you intend to use as an MTP
+    /// draft, otherwise the MTP tensors are simply absent at inference time.
+    #[must_use]
+    pub fn with_load_mtp(mut self, load_mtp: bool) -> Self {
+        self.params.load_mtp = load_mtp;
+        self
+    }
+
+    /// Get `load_mtp`
+    ///
+    /// Whether the model's multi-token-prediction layers will be loaded.
+    #[must_use]
+    pub fn load_mtp(&self) -> bool {
+        self.params.load_mtp
+    }
+
     /// Sets a callback invoked during loading with progress in `0.0..=1.0`.
     /// Returning `false` aborts the load (it then fails with `NullResult`).
     #[must_use]
