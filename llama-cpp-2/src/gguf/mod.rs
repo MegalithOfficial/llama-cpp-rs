@@ -90,6 +90,22 @@ impl GgufContext {
     pub fn n_tensors(&self) -> i64 {
         unsafe { llama_cpp_sys_2::gguf_get_n_tensors(self.ctx.as_ptr()) }
     }
+
+    /// Name of the `idx`th tensor. Returns `None` if the pointer is null or
+    /// not valid UTF-8.
+    pub fn tensor_name(&self, idx: i64) -> Option<&str> {
+        let ptr = unsafe { llama_cpp_sys_2::gguf_get_tensor_name(self.ctx.as_ptr(), idx) };
+        if ptr.is_null() {
+            return None;
+        }
+        unsafe { CStr::from_ptr(ptr).to_str().ok() }
+    }
+
+    /// Size in bytes of the `idx`th tensor's data, as stored in the file.
+    pub fn tensor_size(&self, idx: i64) -> u64 {
+        let size = unsafe { llama_cpp_sys_2::gguf_get_tensor_size(self.ctx.as_ptr(), idx) };
+        u64::try_from(size).unwrap_or(0)
+    }
 }
 
 impl Drop for GgufContext {
