@@ -232,6 +232,22 @@ static llama_rs_status to_common_chat_msg(
     return LLAMA_RS_STATUS_OK;
 }
 
+static llama_rs_status fill_thinking_metadata(
+    const common_chat_params & params,
+    struct llama_rs_chat_template_result * out_result) {
+    out_result->supports_thinking = params.supports_thinking;
+    if (!params.thinking_start_tag.empty()) {
+        out_result->thinking_start_tag = llama_rs_dup_string(params.thinking_start_tag);
+        if (!out_result->thinking_start_tag) {
+            return LLAMA_RS_STATUS_ALLOCATION_FAILED;
+        }
+    }
+    return dup_string_array(
+        params.thinking_end_tags,
+        &out_result->thinking_end_tags,
+        &out_result->thinking_end_tags_count);
+}
+
 extern "C" llama_rs_status llama_rs_apply_chat_template_with_tools_oaicompat(
     const struct llama_model * model,
     const char * chat_template,
@@ -257,6 +273,10 @@ extern "C" llama_rs_status llama_rs_apply_chat_template_with_tools_oaicompat(
     out_result->preserved_tokens_count = 0;
     out_result->additional_stops = nullptr;
     out_result->additional_stops_count = 0;
+    out_result->supports_thinking = false;
+    out_result->thinking_start_tag = nullptr;
+    out_result->thinking_end_tags = nullptr;
+    out_result->thinking_end_tags_count = 0;
 
     try {
         auto tmpls = common_chat_templates_init(model, chat_template);
@@ -316,6 +336,11 @@ extern "C" llama_rs_status llama_rs_apply_chat_template_with_tools_oaicompat(
             llama_rs_chat_template_result_free(out_result);
             return status_stops;
         }
+        const auto status_thinking = fill_thinking_metadata(params, out_result);
+        if (status_thinking != LLAMA_RS_STATUS_OK) {
+            llama_rs_chat_template_result_free(out_result);
+            return status_thinking;
+        }
         if (!out_result->prompt) {
             llama_rs_chat_template_result_free(out_result);
             return LLAMA_RS_STATUS_ALLOCATION_FAILED;
@@ -353,6 +378,10 @@ extern "C" llama_rs_status llama_rs_apply_chat_template_oaicompat(
     out_result->preserved_tokens_count = 0;
     out_result->additional_stops = nullptr;
     out_result->additional_stops_count = 0;
+    out_result->supports_thinking = false;
+    out_result->thinking_start_tag = nullptr;
+    out_result->thinking_end_tags = nullptr;
+    out_result->thinking_end_tags_count = 0;
 
     try {
         auto tmpls = common_chat_templates_init(model, chat_template);
@@ -427,6 +456,11 @@ extern "C" llama_rs_status llama_rs_apply_chat_template_oaicompat(
         if (status_stops != LLAMA_RS_STATUS_OK) {
             llama_rs_chat_template_result_free(out_result);
             return status_stops;
+        }
+        const auto status_thinking = fill_thinking_metadata(params_out, out_result);
+        if (status_thinking != LLAMA_RS_STATUS_OK) {
+            llama_rs_chat_template_result_free(out_result);
+            return status_thinking;
         }
         if (!out_result->prompt) {
             llama_rs_chat_template_result_free(out_result);

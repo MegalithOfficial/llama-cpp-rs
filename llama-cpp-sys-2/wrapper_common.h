@@ -29,6 +29,10 @@ struct llama_rs_chat_template_result {
     size_t preserved_tokens_count;
     char ** additional_stops;
     size_t additional_stops_count;
+    bool supports_thinking;
+    char * thinking_start_tag;
+    char ** thinking_end_tags;
+    size_t thinking_end_tags_count;
 };
 
 enum llama_rs_params_fit_status {

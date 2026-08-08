@@ -148,6 +148,79 @@ pub struct ChatTemplateResult {
     pub generation_prompt: String,
     /// Whether tool calls should be parsed from the response.
     pub parse_tool_calls: bool,
+    /// Whether the template models a separate reasoning channel.
+    pub supports_thinking: bool,
+    /// Tag that opens the reasoning channel, e.g. `<think>`.
+    pub thinking_start_tag: Option<String>,
+    /// Tags that close the reasoning channel, e.g. `</think>`.
+    pub thinking_end_tags: Vec<String>,
+}
+
+#[cfg(feature = "common")]
+impl ChatTemplateResult {
+    /// Whether [`Self::prompt`] ends inside an open reasoning block.
+    ///
+    /// Templates such as Qwen3-Thinking and DeepSeek-R1 put the opening
+    /// `<think>` in the generation prompt, so the model resumes inside the
+    /// reasoning channel and only ever emits the closing tag. A caller that
+    /// streams raw text has to seed its own reasoning parser accordingly,
+    /// because no opening tag will appear in the output.
+    ///
+    /// Returns `false` both for templates without a reasoning channel and for
+    /// templates that pre-close it (`<think>\n\n</think>\n\n`, as emitted when
+    /// thinking is disabled).
+    #[must_use]
+    pub fn thinking_forced_open(&self) -> bool {
+        let Some(start) = self.thinking_start_tag.as_deref().filter(|s| !s.is_empty()) else {
+            return false;
+        };
+        let Some(open_at) = self.generation_prompt.rfind(start) else {
+            return false;
+        };
+        let after_open = &self.generation_prompt[open_at + start.len()..];
+        !self
+            .thinking_end_tags
+            .iter()
+            .any(|end| !end.is_empty() && after_open.contains(end.as_str()))
+    }
+}
+
+/// Reads the reasoning-channel metadata out of a raw template result.
+///
+/// # Safety
+///
+/// `raw` must be a result populated by `llama_rs_apply_chat_template*_oaicompat`
+/// that has not yet been freed.
+#[cfg(feature = "common")]
+unsafe fn thinking_metadata_from_raw(
+    raw: &llama_cpp_sys_2::llama_rs_chat_template_result,
+) -> Result<(Option<String>, Vec<String>), ApplyChatTemplateError> {
+    let start_tag = if raw.thinking_start_tag.is_null() {
+        None
+    } else {
+        let bytes = unsafe { CStr::from_ptr(raw.thinking_start_tag) }
+            .to_bytes()
+            .to_vec();
+        Some(String::from_utf8(bytes)?)
+    };
+
+    let end_tags = if raw.thinking_end_tags_count == 0 || raw.thinking_end_tags.is_null() {
+        Vec::new()
+    } else {
+        let tags =
+            unsafe { slice::from_raw_parts(raw.thinking_end_tags, raw.thinking_end_tags_count) };
+        let mut parsed = Vec::with_capacity(tags.len());
+        for tag in tags {
+            if tag.is_null() {
+                continue;
+            }
+            let bytes = unsafe { CStr::from_ptr(*tag) }.to_bytes().to_vec();
+            parsed.push(String::from_utf8(bytes)?);
+        }
+        parsed
+    };
+
+    Ok((start_tag, end_tags))
 }
 
 /// The Rope type that's used within the model.
@@ -964,10 +1037,12 @@ impl LlamaModel {
 
         let mut sampler_configs: Vec<llama_cpp_sys_2::llama_sampler_seq_config> = samplers
             .iter()
-            .map(|(seq_id, sampler)| llama_cpp_sys_2::llama_sampler_seq_config {
-                seq_id: *seq_id,
-                sampler: sampler.sampler,
-            })
+            .map(
+                |(seq_id, sampler)| llama_cpp_sys_2::llama_sampler_seq_config {
+                    seq_id: *seq_id,
+                    sampler: sampler.sampler,
+                },
+            )
             .collect();
 
         if !sampler_configs.is_empty() {
@@ -980,7 +1055,12 @@ impl LlamaModel {
         };
         let context = NonNull::new(context).ok_or(LlamaContextLoadError::NullReturn)?;
 
-        Ok(LlamaContext::with_samplers(self, context, params.embeddings(), samplers))
+        Ok(LlamaContext::with_samplers(
+            self,
+            context,
+            params.embeddings(),
+            samplers,
+        ))
     }
 
     /// Apply the models chat template to some messages.
@@ -1098,6 +1178,10 @@ impl LlamaModel {
             preserved_tokens_count: 0,
             additional_stops: ptr::null_mut(),
             additional_stops_count: 0,
+            supports_thinking: false,
+            thinking_start_tag: ptr::null_mut(),
+            thinking_end_tags: ptr::null_mut(),
+            thinking_end_tags_count: 0,
         };
 
         let rc = unsafe {
@@ -1239,6 +1323,8 @@ impl LlamaModel {
                 parsed
             };
             let parse_tool_calls = tools_json.is_some_and(|tools| !tools.is_empty());
+            let (thinking_start_tag, thinking_end_tags) =
+                unsafe { thinking_metadata_from_raw(&raw_result) }?;
             Ok(ChatTemplateResult {
                 prompt,
                 grammar,
@@ -1250,6 +1336,9 @@ impl LlamaModel {
                 parser,
                 generation_prompt,
                 parse_tool_calls,
+                supports_thinking: raw_result.supports_thinking,
+                thinking_start_tag,
+                thinking_end_tags,
             })
         })();
 
@@ -1287,6 +1376,10 @@ impl LlamaModel {
             preserved_tokens_count: 0,
             additional_stops: ptr::null_mut(),
             additional_stops_count: 0,
+            supports_thinking: false,
+            thinking_start_tag: ptr::null_mut(),
+            thinking_end_tags: ptr::null_mut(),
+            thinking_end_tags_count: 0,
         };
 
         let ffi_params = llama_cpp_sys_2::llama_rs_chat_template_oaicompat_params {
@@ -1448,6 +1541,8 @@ impl LlamaModel {
                 parsed
             };
 
+            let (thinking_start_tag, thinking_end_tags) =
+                unsafe { thinking_metadata_from_raw(&raw_result) }?;
             Ok(ChatTemplateResult {
                 prompt,
                 grammar,
@@ -1459,6 +1554,9 @@ impl LlamaModel {
                 parser,
                 generation_prompt,
                 parse_tool_calls,
+                supports_thinking: raw_result.supports_thinking,
+                thinking_start_tag,
+                thinking_end_tags,
             })
         })();
 

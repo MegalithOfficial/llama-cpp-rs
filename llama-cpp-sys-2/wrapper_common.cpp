@@ -51,6 +51,15 @@ extern "C" void llama_rs_chat_template_result_free(struct llama_rs_chat_template
         }
         std::free(result->additional_stops);
     }
+    if (result->thinking_start_tag) {
+        std::free(result->thinking_start_tag);
+    }
+    if (result->thinking_end_tags) {
+        for (size_t i = 0; i < result->thinking_end_tags_count; ++i) {
+            std::free(result->thinking_end_tags[i]);
+        }
+        std::free(result->thinking_end_tags);
+    }
     result->prompt = nullptr;
     result->grammar = nullptr;
     result->parser = nullptr;
@@ -63,6 +72,10 @@ extern "C" void llama_rs_chat_template_result_free(struct llama_rs_chat_template
     result->preserved_tokens_count = 0;
     result->additional_stops = nullptr;
     result->additional_stops_count = 0;
+    result->supports_thinking = false;
+    result->thinking_start_tag = nullptr;
+    result->thinking_end_tags = nullptr;
+    result->thinking_end_tags_count = 0;
 }
 
 static thread_local std::string llama_rs_last_error_storage;
