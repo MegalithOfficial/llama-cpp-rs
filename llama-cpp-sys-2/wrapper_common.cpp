@@ -13,6 +13,7 @@
 #include "llama.cpp/common/speculative.h"
 #include "llama.cpp/include/llama.h"
 #include "llama.cpp/src/llama-ext.h"
+#include "llama.cpp/src/llama-model.h"
 #include "wrapper_utils.h"
 
 #include <nlohmann/json.hpp>
@@ -105,6 +106,51 @@ extern "C" llama_rs_status llama_rs_json_schema_to_grammar(
     } catch (const std::exception & e) {
         llama_rs_set_last_error(e.what());
         return LLAMA_RS_STATUS_EXCEPTION;
+    }
+}
+
+extern "C" llama_rs_status llama_rs_model_kv_geometry(
+    const struct llama_model * model,
+    struct llama_rs_kv_layer_geometry ** out_layers,
+    size_t * out_count,
+    uint32_t * out_n_swa) {
+    if (!model || !out_layers || !out_count || !out_n_swa) {
+        return LLAMA_RS_STATUS_INVALID_ARGUMENT;
+    }
+    *out_layers = nullptr;
+    *out_count = 0;
+    *out_n_swa = 0;
+
+    try {
+        const auto & hparams = model->hparams;
+        const uint32_t n_layer = hparams.n_layer();
+        if (n_layer == 0) {
+            return LLAMA_RS_STATUS_OK;
+        }
+        auto * layers = static_cast<struct llama_rs_kv_layer_geometry *>(
+            std::malloc(sizeof(struct llama_rs_kv_layer_geometry) * n_layer));
+        if (!layers) {
+            return LLAMA_RS_STATUS_ALLOCATION_FAILED;
+        }
+        for (uint32_t il = 0; il < n_layer; ++il) {
+            layers[il].n_head_kv = hparams.n_head_kv(il);
+            layers[il].n_embd_head_k = hparams.n_embd_head_k(il);
+            layers[il].n_embd_head_v = hparams.n_embd_head_v(il);
+            layers[il].is_swa = hparams.is_swa(il);
+        }
+        *out_layers = layers;
+        *out_count = n_layer;
+        *out_n_swa = hparams.n_swa;
+        return LLAMA_RS_STATUS_OK;
+    } catch (const std::exception & e) {
+        llama_rs_set_last_error(e.what());
+        return LLAMA_RS_STATUS_EXCEPTION;
+    }
+}
+
+extern "C" void llama_rs_kv_geometry_free(struct llama_rs_kv_layer_geometry * layers) {
+    if (layers) {
+        std::free(layers);
     }
 }
 

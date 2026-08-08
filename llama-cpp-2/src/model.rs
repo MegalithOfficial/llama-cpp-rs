@@ -203,6 +203,22 @@ unsafe fn thinking_metadata_from_raw(
     Ok((start_tag, end_tags))
 }
 
+#[cfg(feature = "common")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KvLayerGeometry {
+    pub n_head_kv: u32,
+    pub n_embd_head_k: u32,
+    pub n_embd_head_v: u32,
+    pub is_swa: bool,
+}
+
+#[cfg(feature = "common")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KvGeometry {
+    pub layers: Vec<KvLayerGeometry>,
+    pub n_swa: u32,
+}
+
 /// The Rope type that's used within the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RopeType {
@@ -770,6 +786,39 @@ impl LlamaModel {
         // the field it's accessing is a uint32_t.
         u32::try_from(unsafe { llama_cpp_sys_2::llama_model_n_head_kv(self.model.as_ptr()) })
             .unwrap()
+    }
+
+    #[cfg(feature = "common")]
+    #[must_use]
+    pub fn kv_geometry(&self) -> Option<KvGeometry> {
+        let mut raw: *mut llama_cpp_sys_2::llama_rs_kv_layer_geometry = ptr::null_mut();
+        let mut count: usize = 0;
+        let mut n_swa: u32 = 0;
+        let rc = unsafe {
+            llama_cpp_sys_2::llama_rs_model_kv_geometry(
+                self.model.as_ptr(),
+                &mut raw,
+                &mut count,
+                &mut n_swa,
+            )
+        };
+        if !status_is_ok(rc) || raw.is_null() || count == 0 {
+            if !raw.is_null() {
+                unsafe { llama_cpp_sys_2::llama_rs_kv_geometry_free(raw) };
+            }
+            return None;
+        }
+        let layers = unsafe { slice::from_raw_parts(raw, count) }
+            .iter()
+            .map(|layer| KvLayerGeometry {
+                n_head_kv: layer.n_head_kv,
+                n_embd_head_k: layer.n_embd_head_k,
+                n_embd_head_v: layer.n_embd_head_v,
+                is_swa: layer.is_swa,
+            })
+            .collect();
+        unsafe { llama_cpp_sys_2::llama_rs_kv_geometry_free(raw) };
+        Some(KvGeometry { layers, n_swa })
     }
 
     /// Get metadata value as a string by key name

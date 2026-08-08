@@ -35,6 +35,13 @@ struct llama_rs_chat_template_result {
     size_t thinking_end_tags_count;
 };
 
+struct llama_rs_kv_layer_geometry {
+    uint32_t n_head_kv;
+    uint32_t n_embd_head_k;
+    uint32_t n_embd_head_v;
+    bool is_swa;
+};
+
 enum llama_rs_params_fit_status {
     LLAMA_RS_PARAMS_FIT_STATUS_SUCCESS = 0,
     LLAMA_RS_PARAMS_FIT_STATUS_FAILURE = 1,
@@ -98,6 +105,14 @@ void llama_rs_set_embeddings_nextn(struct llama_context * ctx, bool value, bool 
 float * llama_rs_get_embeddings_nextn(struct llama_context * ctx);
 
 float * llama_rs_get_embeddings_nextn_ith(struct llama_context * ctx, int32_t i);
+
+llama_rs_status llama_rs_model_kv_geometry(
+    const struct llama_model * model,
+    struct llama_rs_kv_layer_geometry ** out_layers,
+    size_t * out_count,
+    uint32_t * out_n_swa);
+
+void llama_rs_kv_geometry_free(struct llama_rs_kv_layer_geometry * layers);
 
 void llama_rs_chat_template_result_free(struct llama_rs_chat_template_result * result);
 void llama_rs_string_free(char * ptr);
