@@ -148,27 +148,13 @@ pub struct ChatTemplateResult {
     pub generation_prompt: String,
     /// Whether tool calls should be parsed from the response.
     pub parse_tool_calls: bool,
-    /// Whether the template models a separate reasoning channel.
     pub supports_thinking: bool,
-    /// Tag that opens the reasoning channel, e.g. `<think>`.
     pub thinking_start_tag: Option<String>,
-    /// Tags that close the reasoning channel, e.g. `</think>`.
     pub thinking_end_tags: Vec<String>,
 }
 
 #[cfg(feature = "common")]
 impl ChatTemplateResult {
-    /// Whether [`Self::prompt`] ends inside an open reasoning block.
-    ///
-    /// Templates such as Qwen3-Thinking and DeepSeek-R1 put the opening
-    /// `<think>` in the generation prompt, so the model resumes inside the
-    /// reasoning channel and only ever emits the closing tag. A caller that
-    /// streams raw text has to seed its own reasoning parser accordingly,
-    /// because no opening tag will appear in the output.
-    ///
-    /// Returns `false` both for templates without a reasoning channel and for
-    /// templates that pre-close it (`<think>\n\n</think>\n\n`, as emitted when
-    /// thinking is disabled).
     #[must_use]
     pub fn thinking_forced_open(&self) -> bool {
         let Some(start) = self.thinking_start_tag.as_deref().filter(|s| !s.is_empty()) else {
@@ -185,12 +171,6 @@ impl ChatTemplateResult {
     }
 }
 
-/// Reads the reasoning-channel metadata out of a raw template result.
-///
-/// # Safety
-///
-/// `raw` must be a result populated by `llama_rs_apply_chat_template*_oaicompat`
-/// that has not yet been freed.
 #[cfg(feature = "common")]
 unsafe fn thinking_metadata_from_raw(
     raw: &llama_cpp_sys_2::llama_rs_chat_template_result,

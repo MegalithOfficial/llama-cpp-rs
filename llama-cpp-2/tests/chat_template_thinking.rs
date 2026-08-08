@@ -1,17 +1,3 @@
-//! Guards the reasoning-channel contract of `apply_chat_template_oaicompat`.
-//!
-//! Templates in the Qwen3-Thinking and DeepSeek-R1 families put the opening
-//! `<think>` in the generation prompt, so the model resumes inside the
-//! reasoning channel and only emits the closing tag. That prefill has to
-//! survive into the rendered prompt: without it the model is never nudged into
-//! the reasoning channel and reasoning leaks into the answer content. Upstream
-//! merges rewrite the prompt-assembly path often enough that this deserves a
-//! test rather than trust.
-//!
-//! These run against the vocabulary bundled with the `llama.cpp` submodule.
-//! Override it with `LLAMA_TEST_VOCAB_GGUF`; the tests skip when neither is
-//! available.
-
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -20,8 +6,6 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{ChatTemplateResult, LlamaChatTemplate, LlamaModel};
 use llama_cpp_2::openai::OpenAIChatTemplateParams;
 
-/// Renders assistant turns with an explicit `<think>` block, which is what lets
-/// the differential autoparser recognise a reasoning channel at all.
 const HISTORY: &str = r"
 {%- for message in messages %}
     {%- if message.role == 'assistant' %}
@@ -32,8 +16,6 @@ const HISTORY: &str = r"
 {%- endfor %}
 ";
 
-/// Qwen3-Thinking / Qwen3.5-Thinking generation-prompt shape: `<think>` is
-/// forced open unless thinking is explicitly turned off.
 const FORCED_OPEN_TAIL: &str = r"
 {%- if add_generation_prompt %}
     {{- '<|im_start|>assistant\n' }}
@@ -45,8 +27,6 @@ const FORCED_OPEN_TAIL: &str = r"
 {%- endif %}
 ";
 
-/// Original Qwen3 shape: the model opens its own `<think>`, so the generation
-/// prompt carries a tag only when thinking is turned off.
 const SELF_OPENING_TAIL: &str = r"
 {%- if add_generation_prompt %}
     {{- '<|im_start|>assistant\n' }}
@@ -58,8 +38,6 @@ const SELF_OPENING_TAIL: &str = r"
 
 const MESSAGES: &str = r#"[{"role":"user","content":"Hi"}]"#;
 
-/// `LLAMA_TEST_VOCAB_GGUF` when set, else the vocabulary bundled with the
-/// submodule, else `None` so the tests skip instead of failing.
 fn vocab_path() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("LLAMA_TEST_VOCAB_GGUF") {
         return Some(PathBuf::from(path));
@@ -69,12 +47,6 @@ fn vocab_path() -> Option<PathBuf> {
     bundled.exists().then_some(bundled)
 }
 
-/// The vocabulary from [`vocab_path`], or `None` to skip.
-///
-/// The backend can be started only one time in a process, and the tests share
-/// this process, so both the backend and the model are made one time here.
-/// `vocab_only` keeps the load cheap: rendering an explicit template needs the
-/// bos/eos tokens and no tensor data.
 fn model() -> Option<&'static LlamaModel> {
     static MODEL: OnceLock<Option<(LlamaBackend, LlamaModel)>> = OnceLock::new();
     MODEL
