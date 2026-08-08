@@ -35,6 +35,15 @@ struct llama_rs_chat_template_result {
     size_t thinking_end_tags_count;
 };
 
+struct llama_rs_memory_projection {
+    uint64_t device_model;
+    uint64_t device_context;
+    uint64_t device_compute;
+    uint64_t host_model;
+    uint64_t host_context;
+    uint64_t host_compute;
+};
+
 struct llama_rs_kv_layer_geometry {
     uint32_t n_head_kv;
     uint32_t n_embd_head_k;
@@ -105,6 +114,12 @@ void llama_rs_set_embeddings_nextn(struct llama_context * ctx, bool value, bool 
 float * llama_rs_get_embeddings_nextn(struct llama_context * ctx);
 
 float * llama_rs_get_embeddings_nextn_ith(struct llama_context * ctx, int32_t i);
+
+llama_rs_status llama_rs_project_memory(
+    const char * path_model,
+    const struct llama_model_params * mparams,
+    const struct llama_context_params * cparams,
+    struct llama_rs_memory_projection * out_projection);
 
 llama_rs_status llama_rs_model_kv_geometry(
     const struct llama_model * model,

@@ -153,6 +153,17 @@ fn load_mode_from_flags(use_mmap: bool, use_mlock: bool) -> llama_cpp_sys_2::lla
     }
 }
 
+#[cfg(feature = "common")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MemoryProjection {
+    pub device_model: u64,
+    pub device_context: u64,
+    pub device_compute: u64,
+    pub host_model: u64,
+    pub host_context: u64,
+    pub host_compute: u64,
+}
+
 /// A safe wrapper around `llama_model_params`.
 #[allow(clippy::module_name_repetitions)]
 pub struct LlamaModelParams {
@@ -630,6 +641,42 @@ impl LlamaModelParams {
     #[must_use]
     pub fn no_alloc(&self) -> bool {
         self.params.no_alloc
+    }
+
+    #[cfg(feature = "common")]
+    pub fn project_memory(
+        &self,
+        path_model: &std::path::Path,
+        cparams: &LlamaContextParams,
+    ) -> Option<MemoryProjection> {
+        let path = std::ffi::CString::new(path_model.to_str()?).ok()?;
+        let mut raw = llama_cpp_sys_2::llama_rs_memory_projection {
+            device_model: 0,
+            device_context: 0,
+            device_compute: 0,
+            host_model: 0,
+            host_context: 0,
+            host_compute: 0,
+        };
+        let rc = unsafe {
+            llama_cpp_sys_2::llama_rs_project_memory(
+                path.as_ptr(),
+                &self.params,
+                &cparams.context_params,
+                &mut raw,
+            )
+        };
+        if rc != 0 {
+            return None;
+        }
+        Some(MemoryProjection {
+            device_model: raw.device_model,
+            device_context: raw.device_context,
+            device_compute: raw.device_compute,
+            host_model: raw.host_model,
+            host_context: raw.host_context,
+            host_compute: raw.host_compute,
+        })
     }
 
     #[must_use]

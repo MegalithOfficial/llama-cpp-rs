@@ -109,6 +109,62 @@ extern "C" llama_rs_status llama_rs_json_schema_to_grammar(
     }
 }
 
+extern "C" llama_rs_status llama_rs_project_memory(
+    const char * path_model,
+    const struct llama_model_params * mparams,
+    const struct llama_context_params * cparams,
+    struct llama_rs_memory_projection * out_projection) {
+    if (!path_model || !mparams || !cparams || !out_projection) {
+        return LLAMA_RS_STATUS_INVALID_ARGUMENT;
+    }
+    *out_projection = {};
+
+    llama_model * model = nullptr;
+    llama_context * ctx = nullptr;
+    try {
+        llama_model_params mparams_copy = *mparams;
+        mparams_copy.no_alloc = true;
+        mparams_copy.load_mode = LLAMA_LOAD_MODE_NONE;
+
+        model = llama_model_load_from_file(path_model, mparams_copy);
+        if (!model) {
+            llama_rs_set_last_error("failed to load model for memory projection");
+            return LLAMA_RS_STATUS_EXCEPTION;
+        }
+        ctx = llama_init_from_model(model, *cparams);
+        if (!ctx) {
+            llama_model_free(model);
+            llama_rs_set_last_error("failed to create context for memory projection");
+            return LLAMA_RS_STATUS_EXCEPTION;
+        }
+
+        for (const auto & [buft, mb] : llama_get_memory_breakdown(ctx)) {
+            if (ggml_backend_buft_is_host(buft)) {
+                out_projection->host_model += mb.model;
+                out_projection->host_context += mb.context;
+                out_projection->host_compute += mb.compute;
+            } else {
+                out_projection->device_model += mb.model;
+                out_projection->device_context += mb.context;
+                out_projection->device_compute += mb.compute;
+            }
+        }
+
+        llama_free(ctx);
+        llama_model_free(model);
+        return LLAMA_RS_STATUS_OK;
+    } catch (const std::exception & e) {
+        if (ctx) {
+            llama_free(ctx);
+        }
+        if (model) {
+            llama_model_free(model);
+        }
+        llama_rs_set_last_error(e.what());
+        return LLAMA_RS_STATUS_EXCEPTION;
+    }
+}
+
 extern "C" llama_rs_status llama_rs_model_kv_geometry(
     const struct llama_model * model,
     struct llama_rs_kv_layer_geometry ** out_layers,
