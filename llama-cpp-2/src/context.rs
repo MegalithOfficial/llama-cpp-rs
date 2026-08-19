@@ -274,6 +274,39 @@ impl<'model> LlamaContext<'model> {
         }
     }
 
+    pub fn set_embeddings_layer_inp(&mut self, layer: u32, enabled: bool) {
+        unsafe {
+            llama_cpp_sys_2::llama_rs_set_embeddings_layer_inp(
+                self.context.as_ptr(),
+                layer,
+                enabled,
+            );
+        }
+    }
+
+    pub fn embeddings_layer_inp(
+        &self,
+        layer: u32,
+        n_tokens: usize,
+    ) -> Result<&[f32], EmbeddingsError> {
+        let n_embd =
+            usize::try_from(self.model.n_embd()).expect("n_embd does not fit into a usize");
+
+        unsafe {
+            let embedding =
+                llama_cpp_sys_2::llama_rs_get_embeddings_layer_inp(self.context.as_ptr(), layer);
+            if embedding.is_null() {
+                Err(EmbeddingsError::LogitsNotEnabled)
+            } else {
+                Ok(slice::from_raw_parts(embedding, n_embd * n_tokens))
+            }
+        }
+    }
+
+    pub fn set_causal_attn(&mut self, causal: bool) {
+        unsafe { llama_cpp_sys_2::llama_set_causal_attn(self.context.as_ptr(), causal) }
+    }
+
     /// The correct output width for an embeddings read, keyed on the context's
     /// LIVE pooling type rather than the model's `n_embd`.
     ///

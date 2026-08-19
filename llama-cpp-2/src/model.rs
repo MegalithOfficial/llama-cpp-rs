@@ -294,6 +294,12 @@ impl LlamaModel {
         LlamaToken(token)
     }
 
+    #[must_use]
+    pub fn token_mask(&self) -> LlamaToken {
+        let token = unsafe { llama_cpp_sys_2::llama_vocab_mask(self.vocab_ptr()) };
+        LlamaToken(token)
+    }
+
     /// Get the end of stream token.
     #[must_use]
     pub fn token_eos(&self) -> LlamaToken {
@@ -727,6 +733,19 @@ impl LlamaModel {
     #[must_use]
     pub fn n_embd_out(&self) -> c_int {
         unsafe { llama_cpp_sys_2::llama_model_n_embd_out(self.model.as_ptr()) }
+    }
+
+    #[must_use]
+    pub fn target_layer_ids(&self) -> &[i32] {
+        unsafe {
+            let ids = llama_cpp_sys_2::llama_rs_model_target_layer_ids(self.model.as_ptr());
+            let n = llama_cpp_sys_2::llama_rs_model_target_layer_ids_n(self.model.as_ptr());
+            if ids.is_null() || n == 0 {
+                &[]
+            } else {
+                slice::from_raw_parts(ids, n as usize)
+            }
+        }
     }
 
     /// The model's classification output width (`n_cls_out`, default 1) — the

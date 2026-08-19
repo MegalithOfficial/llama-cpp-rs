@@ -115,6 +115,14 @@ float * llama_rs_get_embeddings_nextn(struct llama_context * ctx);
 
 float * llama_rs_get_embeddings_nextn_ith(struct llama_context * ctx, int32_t i);
 
+void llama_rs_set_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid, bool value);
+
+float * llama_rs_get_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid);
+
+const int32_t * llama_rs_model_target_layer_ids(const struct llama_model * model);
+
+uint32_t llama_rs_model_target_layer_ids_n(const struct llama_model * model);
+
 llama_rs_status llama_rs_project_memory(
     const char * path_model,
     const struct llama_model_params * mparams,

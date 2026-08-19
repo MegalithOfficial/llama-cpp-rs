@@ -376,3 +376,31 @@ extern "C" float * llama_rs_get_embeddings_nextn_ith(struct llama_context * ctx,
     }
     return llama_get_embeddings_nextn_ith(ctx, i);
 }
+
+extern "C" void llama_rs_set_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid, bool value) {
+    if (!ctx) {
+        return;
+    }
+    llama_set_embeddings_layer_inp(ctx, lid, value);
+}
+
+extern "C" float * llama_rs_get_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid) {
+    if (!ctx) {
+        return nullptr;
+    }
+    return llama_get_embeddings_layer_inp(ctx, lid);
+}
+
+extern "C" const int32_t * llama_rs_model_target_layer_ids(const struct llama_model * model) {
+    if (!model) {
+        return nullptr;
+    }
+    return llama_model_target_layer_ids(model);
+}
+
+extern "C" uint32_t llama_rs_model_target_layer_ids_n(const struct llama_model * model) {
+    if (!model) {
+        return 0;
+    }
+    return llama_model_target_layer_ids_n(model);
+}
