@@ -298,6 +298,18 @@ impl LlamaSampler {
         Self { sampler }
     }
 
+    /// Adaptive-P sampler as described in <https://github.com/ggml-org/llama.cpp/pull/17927>
+    ///
+    /// Selects tokens near `target` probability, adapting over an exponential moving average
+    /// whose history is roughly `1/(1-decay)` tokens. This sampler picks a token rather than
+    /// filtering candidates, so it must be last in the chain like `dist` or `greedy`.
+    #[must_use]
+    pub fn adaptive_p(target: f32, decay: f32, seed: u32) -> Self {
+        let sampler =
+            unsafe { llama_cpp_sys_2::llama_sampler_init_adaptive_p(target, decay, seed) };
+        Self { sampler }
+    }
+
     /// Grammar sampler
     #[must_use]
     pub fn grammar(
