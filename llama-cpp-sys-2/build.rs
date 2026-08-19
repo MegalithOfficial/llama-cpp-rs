@@ -1295,14 +1295,22 @@ fn main() {
             common_lib_dirs.push(common_profile_dir);
         }
 
-        // The common lib depends on the vendored cpp-httplib static lib,
-        // which is built in the vendor directory and not installed.
-        let httplib_dir = out_dir.join("build").join("vendor").join("cpp-httplib");
-        if httplib_dir.is_dir() {
-            common_lib_dirs.push(httplib_dir.clone());
-            let httplib_profile_dir = httplib_dir.join(&profile);
-            if httplib_profile_dir.is_dir() {
-                common_lib_dirs.push(httplib_profile_dir);
+        // The common and mtmd libs depend on vendored static libs (cpp-httplib,
+        // vendor-hash, ...) that are built under vendor/ and never installed.
+        let vendor_dir = out_dir.join("build").join("vendor");
+        if let Ok(entries) = std::fs::read_dir(&vendor_dir) {
+            let mut vendor_dirs = entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect::<Vec<_>>();
+            vendor_dirs.sort();
+            for dir in vendor_dirs {
+                let profile_dir = dir.join(&profile);
+                common_lib_dirs.push(dir);
+                if profile_dir.is_dir() {
+                    common_lib_dirs.push(profile_dir);
+                }
             }
         }
 
