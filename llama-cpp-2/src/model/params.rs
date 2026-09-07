@@ -484,12 +484,15 @@ impl LlamaModelParams {
     /// `use_mmap`/`use_mlock` were replaced by a single `load_mode` enum
     /// (`args: refactor mlock/mmap/directio into load-mode`, #20834); this
     /// getter decodes the combined mode back into the two independent flags
-    /// this crate's public API still exposes.
+    /// this crate's public API still exposes. The default mode is `AUTO`, which
+    /// mmaps where the platform allows it, so it reads back as `true`.
     #[must_use]
     pub fn use_mmap(&self) -> bool {
         matches!(
             self.params.load_mode,
-            llama_cpp_sys_2::LLAMA_LOAD_MODE_MMAP | llama_cpp_sys_2::LLAMA_LOAD_MODE_MMAP_MLOCK
+            llama_cpp_sys_2::LLAMA_LOAD_MODE_AUTO
+                | llama_cpp_sys_2::LLAMA_LOAD_MODE_MMAP
+                | llama_cpp_sys_2::LLAMA_LOAD_MODE_MMAP_MLOCK
         )
     }
 
