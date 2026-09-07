@@ -150,6 +150,40 @@ pub enum LlamaContextLoadError {
     /// llama.cpp returned null
     #[error("null reference from llama.cpp")]
     NullReturn,
+    /// The requested K/V cache types are not valid for this model.
+    #[error(transparent)]
+    KvCacheType(#[from] KvCacheTypeError),
+}
+
+/// A K/V cache type combination llama.cpp will refuse to build a context with.
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
+pub enum KvCacheTypeError {
+    /// A quantized V cache is only implemented on the flash-attention path.
+    #[error("quantized V cache requires flash attention to be enabled")]
+    QuantizedVNeedsFlashAttention,
+    /// MLA and DeepSeek 4 read K and V out of one tensor, so the two types cannot differ.
+    #[error("model does not support different K and V cache types")]
+    MixedTypesUnsupported,
+    /// The K type's block size does not divide the layer's head width.
+    #[error("K cache block size {block_size} does not divide n_embd_head_k={n_embd_head} of layer {layer}")]
+    KBlockSize {
+        /// Index of the offending layer.
+        layer: usize,
+        /// Elements per block of the requested type.
+        block_size: u32,
+        /// Key head width of that layer.
+        n_embd_head: u32,
+    },
+    /// The V type's block size does not divide the layer's head width.
+    #[error("V cache block size {block_size} does not divide n_embd_head_v={n_embd_head} of layer {layer}")]
+    VBlockSize {
+        /// Index of the offending layer.
+        layer: usize,
+        /// Elements per block of the requested type.
+        block_size: u32,
+        /// Value head width of that layer.
+        n_embd_head: u32,
+    },
 }
 
 /// Errors from the sequence-state save/restore API.

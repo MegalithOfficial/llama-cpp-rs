@@ -127,6 +127,8 @@ void llama_rs_set_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid,
 
 float * llama_rs_get_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid);
 
+bool llama_rs_model_requires_uniform_kv_type(const struct llama_model * model);
+
 int32_t llama_rs_model_dflash_selector_top_k(const struct llama_model * model);
 
 const int32_t * llama_rs_model_target_layer_ids(const struct llama_model * model);

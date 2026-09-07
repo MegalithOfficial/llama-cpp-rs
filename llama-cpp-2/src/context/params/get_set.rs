@@ -553,12 +553,21 @@ impl LlamaContextParams {
 
     /// Set the KV cache data type for K
     ///
+    /// K and V are set independently, so the two halves can carry different quantizations.
+    /// llama.cpp constrains the pair; [`LlamaModel::validate_kv_cache_types`] reports which
+    /// rule a combination breaks.
+    ///
+    /// [`LlamaModel::validate_kv_cache_types`]: crate::model::LlamaModel::validate_kv_cache_types
+    ///
     /// # Examples
     ///
     /// ```rust
     /// # use llama_cpp_2::context::params::{LlamaContextParams, KvCacheType};
-    /// let params = LlamaContextParams::default().with_type_k(KvCacheType::Q4_0);
-    /// assert_eq!(params.type_k(), KvCacheType::Q4_0);
+    /// let params = LlamaContextParams::default()
+    ///     .with_type_k(KvCacheType::Q8_0)
+    ///     .with_type_v(KvCacheType::Q4_0);
+    /// assert_eq!(params.type_k(), KvCacheType::Q8_0);
+    /// assert_eq!(params.type_v(), KvCacheType::Q4_0);
     /// ```
     #[must_use]
     pub fn with_type_k(mut self, type_k: KvCacheType) -> Self {
@@ -581,6 +590,13 @@ impl LlamaContextParams {
     }
 
     /// Set the KV cache data type for V
+    ///
+    /// A quantized V cache only works on the flash-attention path. The default
+    /// flash-attention policy is `AUTO`, which llama.cpp turns on by itself here; setting it to
+    /// `DISABLED` makes context creation fail with
+    /// [`KvCacheTypeError::QuantizedVNeedsFlashAttention`].
+    ///
+    /// [`KvCacheTypeError::QuantizedVNeedsFlashAttention`]: crate::KvCacheTypeError::QuantizedVNeedsFlashAttention
     ///
     /// # Examples
     ///

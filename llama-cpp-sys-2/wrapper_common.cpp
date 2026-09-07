@@ -404,6 +404,13 @@ extern "C" float * llama_rs_get_embeddings_layer_inp(struct llama_context * ctx,
     return llama_get_embeddings_layer_inp(ctx, lid);
 }
 
+extern "C" bool llama_rs_model_requires_uniform_kv_type(const struct llama_model * model) {
+    if (!model) {
+        return false;
+    }
+    return model->hparams.is_mla() || model->arch == LLM_ARCH_DEEPSEEK4;
+}
+
 extern "C" int32_t llama_rs_model_dflash_selector_top_k(const struct llama_model * model) {
     if (!model) {
         return 0;

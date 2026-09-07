@@ -23,6 +23,8 @@ use crate::{
     LlamaModelLoadError, MetaValError, NewLlamaChatMessageError, StringToTokenError,
     TokenToStringError,
 };
+#[cfg(feature = "common")]
+use crate::KvCacheTypeError;
 
 pub mod params;
 
@@ -735,6 +737,67 @@ impl LlamaModel {
         unsafe { llama_cpp_sys_2::llama_model_n_embd_out(self.model.as_ptr()) }
     }
 
+    /// Check the context's K/V cache types against what llama.cpp will accept for this model.
+    ///
+    /// `new_context` reports these as [`LlamaContextLoadError::KvCacheType`], so calling this
+    /// directly is only needed to reject a configuration before the model is even loaded.
+    ///
+    /// # Errors
+    ///
+    /// See [`KvCacheTypeError`].
+    #[cfg(feature = "common")]
+    pub fn validate_kv_cache_types(
+        &self,
+        params: &LlamaContextParams,
+    ) -> Result<(), KvCacheTypeError> {
+        let type_k = params.type_k();
+        let type_v = params.type_v();
+        let fa_disabled = params.flash_attention_policy()
+            == llama_cpp_sys_2::LLAMA_FLASH_ATTN_TYPE_DISABLED;
+
+        if type_v.is_quantized() && fa_disabled {
+            return Err(KvCacheTypeError::QuantizedVNeedsFlashAttention);
+        }
+        if type_k != type_v
+            && unsafe {
+                llama_cpp_sys_2::llama_rs_model_requires_uniform_kv_type(self.model.as_ptr())
+            }
+        {
+            return Err(KvCacheTypeError::MixedTypesUnsupported);
+        }
+        if fa_disabled {
+            return Ok(());
+        }
+
+        let Some(geometry) = self.kv_geometry() else {
+            return Ok(());
+        };
+        for (layer, dims) in geometry.layers.iter().enumerate() {
+            if type_k.is_quantized() {
+                let block_size = type_k.block_size();
+                if dims.n_embd_head_k % block_size != 0 {
+                    return Err(KvCacheTypeError::KBlockSize {
+                        layer,
+                        block_size,
+                        n_embd_head: dims.n_embd_head_k,
+                    });
+                }
+            }
+            if type_v.is_quantized() {
+                let block_size = type_v.block_size();
+                if dims.n_embd_head_v % block_size != 0 {
+                    return Err(KvCacheTypeError::VBlockSize {
+                        layer,
+                        block_size,
+                        n_embd_head: dims.n_embd_head_v,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[must_use]
     pub fn dflash_selector_top_k(&self) -> i32 {
         unsafe { llama_cpp_sys_2::llama_rs_model_dflash_selector_top_k(self.model.as_ptr()) }
@@ -1021,9 +1084,19 @@ impl LlamaModel {
         let context = unsafe {
             llama_cpp_sys_2::llama_new_context_with_model(self.model.as_ptr(), context_params)
         };
-        let context = NonNull::new(context).ok_or(LlamaContextLoadError::NullReturn)?;
+        let context = NonNull::new(context).ok_or_else(|| self.context_load_error(&params))?;
 
         Ok(LlamaContext::new(self, context, params.embeddings()))
+    }
+
+    /// Explain a null return from `llama_new_context_with_model` where we can.
+    fn context_load_error(&self, params: &LlamaContextParams) -> LlamaContextLoadError {
+        #[cfg(feature = "common")]
+        if let Err(err) = self.validate_kv_cache_types(params) {
+            return LlamaContextLoadError::KvCacheType(err);
+        }
+        let _ = params;
+        LlamaContextLoadError::NullReturn
     }
 
     /// Create a new context bound to another context via llama.cpp's `ctx_other` field.
@@ -1047,7 +1120,7 @@ impl LlamaModel {
         let context = unsafe {
             llama_cpp_sys_2::llama_new_context_with_model(self.model.as_ptr(), context_params)
         };
-        let context = NonNull::new(context).ok_or(LlamaContextLoadError::NullReturn)?;
+        let context = NonNull::new(context).ok_or_else(|| self.context_load_error(&params))?;
 
         Ok(LlamaContext::new(self, context, params.embeddings()))
     }
@@ -1106,7 +1179,7 @@ impl LlamaModel {
         let context = unsafe {
             llama_cpp_sys_2::llama_new_context_with_model(self.model.as_ptr(), context_params)
         };
-        let context = NonNull::new(context).ok_or(LlamaContextLoadError::NullReturn)?;
+        let context = NonNull::new(context).ok_or_else(|| self.context_load_error(&params))?;
 
         Ok(LlamaContext::with_samplers(
             self,

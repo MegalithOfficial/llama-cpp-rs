@@ -292,6 +292,26 @@ impl From<llama_cpp_sys_2::ggml_type> for KvCacheType {
     }
 }
 
+impl KvCacheType {
+    /// Elements per block; 1 for the unquantized types.
+    ///
+    /// llama.cpp requires this to divide the model's head width, per layer, before it will
+    /// build a cache of this type. See [`LlamaModel::validate_kv_cache_types`].
+    ///
+    /// [`LlamaModel::validate_kv_cache_types`]: crate::model::LlamaModel::validate_kv_cache_types
+    #[must_use]
+    pub fn block_size(self) -> u32 {
+        let blck = unsafe { llama_cpp_sys_2::ggml_blck_size(self.into()) };
+        u32::try_from(blck).unwrap_or(1)
+    }
+
+    /// Whether this is a quantized (blocked) type.
+    #[must_use]
+    pub fn is_quantized(self) -> bool {
+        unsafe { llama_cpp_sys_2::ggml_is_quantized(self.into()) }
+    }
+}
+
 /// A safe wrapper around `llama_context_params`.
 ///
 /// Generally this should be created with [`Default::default()`] and then modified with `with_*` methods.
