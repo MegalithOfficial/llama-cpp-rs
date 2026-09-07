@@ -711,15 +711,30 @@ impl LlamaContextParams {
         self.context_params.op_offload
     }
 
-    /// Set whether to use full sliding window attention
+    /// Set whether the sliding-window layers get a full-size KV cache
+    ///
+    /// This sizes the cache, it does not widen attention: the window mask is derived from
+    /// `n_swa` and the model's SWA type alone, so a bigger cache lets a sliding-window layer
+    /// hold more cells without letting it attend to any of them. The dense layers are on a
+    /// separate full-size cache either way.
+    ///
+    /// With this on, the sliding-window layers get `n_ctx` cells each instead of
+    /// `n_swa * (kv_unified ? n_seq_max : 1) + n_ubatch`, which on an interleaved-SWA model
+    /// costs several times the context memory (Gemma 3 270M at 32k context: 0.56 GiB against
+    /// 0.11 GiB). It buys the ability to reach tokens that have already left the window, which
+    /// context shifting and restoring an older sequence state need. Keeping it off means a
+    /// state snapshot only carries the current window, so checkpoints have to be taken as the
+    /// generation runs, with [`LlamaStateSeqFlags::PARTIAL_ONLY`].
+    ///
+    /// [`LlamaStateSeqFlags::PARTIAL_ONLY`]: crate::context::session::LlamaStateSeqFlags::PARTIAL_ONLY
     ///
     /// # Examples
     ///
     /// ```rust
     /// # use llama_cpp_2::context::params::LlamaContextParams;
     /// let params = LlamaContextParams::default()
-    ///     .with_swa_full(false);
-    /// assert_eq!(params.swa_full(), false);
+    ///     .with_swa_full(true);
+    /// assert_eq!(params.swa_full(), true);
     /// ```
     #[must_use]
     pub fn with_swa_full(mut self, enabled: bool) -> Self {
@@ -727,14 +742,14 @@ impl LlamaContextParams {
         self
     }
 
-    /// Get whether full sliding window attention is enabled
+    /// Get whether the sliding-window layers get a full-size KV cache
     ///
     /// # Examples
     ///
     /// ```rust
     /// # use llama_cpp_2::context::params::LlamaContextParams;
     /// let params = LlamaContextParams::default();
-    /// assert_eq!(params.swa_full(), true);
+    /// assert_eq!(params.swa_full(), false);
     /// ```
     #[must_use]
     pub fn swa_full(&self) -> bool {

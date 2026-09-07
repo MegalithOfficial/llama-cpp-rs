@@ -322,16 +322,22 @@ unsafe impl Send for LlamaContextParams {}
 unsafe impl Sync for LlamaContextParams {}
 
 /// Default parameters for `LlamaContext`. (as defined in llama.cpp by `llama_context_default_params`)
+///
+/// `swa_full` is the one deliberate departure: llama.cpp's C default is `true` for backwards
+/// compatibility, but its own CLI and server override it to `false` via `common_params`. See
+/// [`with_swa_full`](LlamaContextParams::with_swa_full).
 /// ```
 /// # use std::num::NonZeroU32;
 /// # use llama_cpp_2::context::params::{LlamaContextParams, RopeScalingType};
 /// let params = LlamaContextParams::default();
 /// assert_eq!(params.n_ctx(), NonZeroU32::new(512), "n_ctx should be 512");
 /// assert_eq!(params.rope_scaling_type(), RopeScalingType::Unspecified);
+/// assert_eq!(params.swa_full(), false, "swa_full should be false");
 /// ```
 impl Default for LlamaContextParams {
     fn default() -> Self {
-        let context_params = unsafe { llama_cpp_sys_2::llama_context_default_params() };
+        let mut context_params = unsafe { llama_cpp_sys_2::llama_context_default_params() };
+        context_params.swa_full = false;
         Self { context_params }
     }
 }
