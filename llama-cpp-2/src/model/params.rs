@@ -154,6 +154,38 @@ impl Default for LlamaSplitMode {
     }
 }
 
+/// A rusty wrapper around `llama_lazy_mode`.
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum LlamaLazyMode {
+    /// Always read the whole tensor up front.
+    Off = 0,
+    /// Lazy only for marked tensors larger than 4 GiB.
+    Auto = 1,
+    /// Read the rows of tensors marked by the arch on demand.
+    On = 2,
+}
+
+impl From<u32> for LlamaLazyMode {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Self::Off,
+            2 => Self::On,
+            _ => Self::Auto,
+        }
+    }
+}
+
+impl From<LlamaLazyMode> for u32 {
+    fn from(value: LlamaLazyMode) -> Self {
+        match value {
+            LlamaLazyMode::Off => 0,
+            LlamaLazyMode::Auto => 1,
+            LlamaLazyMode::On => 2,
+        }
+    }
+}
+
 /// The maximum number of devices supported.
 ///
 /// The real maximum number of devices is the lesser one of this value and the value returned by
@@ -571,6 +603,12 @@ impl LlamaModelParams {
         )
     }
 
+    /// on-demand reading of tensors marked by the arch
+    #[must_use]
+    pub fn lazy_mode(&self) -> LlamaLazyMode {
+        LlamaLazyMode::from(self.params.lazy_mode)
+    }
+
     /// get the split mode
     ///
     /// # Errors
@@ -646,6 +684,15 @@ impl LlamaModelParams {
     #[must_use]
     pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
         self.params.load_mode = load_mode_from_flags(self.use_mmap(), use_mlock);
+        self
+    }
+
+    /// sets `lazy_mode`
+    ///
+    /// Lazy reading needs mmap; llama.cpp falls back to a full read where mmap is unsupported.
+    #[must_use]
+    pub fn with_lazy_mode(mut self, lazy_mode: LlamaLazyMode) -> Self {
+        self.params.lazy_mode = lazy_mode as _;
         self
     }
 

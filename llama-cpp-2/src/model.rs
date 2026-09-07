@@ -736,6 +736,11 @@ impl LlamaModel {
     }
 
     #[must_use]
+    pub fn dflash_selector_top_k(&self) -> i32 {
+        unsafe { llama_cpp_sys_2::llama_rs_model_dflash_selector_top_k(self.model.as_ptr()) }
+    }
+
+    #[must_use]
     pub fn target_layer_ids(&self) -> &[i32] {
         unsafe {
             let ids = llama_cpp_sys_2::llama_rs_model_target_layer_ids(self.model.as_ptr());
