@@ -16,8 +16,6 @@
 #include "llama.cpp/src/llama-model.h"
 #include "wrapper_utils.h"
 
-#include <nlohmann/json.hpp>
-
 extern "C" void llama_rs_chat_template_result_free(struct llama_rs_chat_template_result * result) {
     if (!result) {
         return;
@@ -99,7 +97,7 @@ extern "C" llama_rs_status llama_rs_json_schema_to_grammar(
 
     *out_grammar = nullptr;
     try {
-        const auto schema = nlohmann::ordered_json::parse(schema_json);
+        const auto schema = common_json::parse(schema_json);
         const auto grammar = json_schema_to_grammar(schema, force_gbnf);
         *out_grammar = llama_rs_dup_string(grammar);
         return *out_grammar ? LLAMA_RS_STATUS_OK : LLAMA_RS_STATUS_ALLOCATION_FAILED;
@@ -308,9 +306,23 @@ extern "C" enum llama_rs_params_fit_status llama_rs_params_fit(
     struct llama_model_tensor_buft_override * tensor_buft_overrides,
     size_t * margins,
     uint32_t n_ctx_min,
+    const struct llama_rs_fit_extra_model * extra,
     enum ggml_log_level log_level) {
     if (!path_model || !mparams || !cparams || !margins) {
         return LLAMA_RS_PARAMS_FIT_STATUS_ERROR;
+    }
+
+    common_fit_extra_model extra_model{};
+    if (extra) {
+        if (!extra->path_model || !extra->mparams || !extra->cparams) {
+            return LLAMA_RS_PARAMS_FIT_STATUS_ERROR;
+        }
+        extra_model = {
+            extra->path_model,
+            extra->mparams,
+            extra->cparams,
+            extra->shares_model,
+        };
     }
 
     switch (common_fit_params(
@@ -321,6 +333,7 @@ extern "C" enum llama_rs_params_fit_status llama_rs_params_fit(
         tensor_buft_overrides,
         margins,
         n_ctx_min,
+        extra ? &extra_model : nullptr,
         log_level)) {
         case COMMON_PARAMS_FIT_STATUS_SUCCESS:
             return LLAMA_RS_PARAMS_FIT_STATUS_SUCCESS;

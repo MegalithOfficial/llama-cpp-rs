@@ -380,7 +380,7 @@ impl MtmdContext {
                 self.context.as_ptr(),
                 chunks.chunks.as_ptr(),
                 &raw const input_text,
-                bitmap_ptrs.as_ptr().cast_mut(),
+                bitmap_ptrs.as_ptr(),
                 bitmaps.len(),
             )
         };
@@ -732,6 +732,7 @@ impl MtmdBitmap {
                 ctx.context.as_ptr(),
                 path_cstr.as_ptr(),
                 placeholder,
+                llama_cpp_sys_2::mtmd_helper_init_opt_default(),
             )
         };
 
@@ -783,6 +784,7 @@ impl MtmdBitmap {
                 data.as_ptr(),
                 data.len(),
                 placeholder,
+                llama_cpp_sys_2::mtmd_helper_init_opt_default(),
             )
         };
 

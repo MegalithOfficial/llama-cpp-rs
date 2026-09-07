@@ -57,6 +57,13 @@ enum llama_rs_params_fit_status {
     LLAMA_RS_PARAMS_FIT_STATUS_ERROR = 2,
 };
 
+struct llama_rs_fit_extra_model {
+    const char * path_model;
+    struct llama_model_params * mparams;
+    struct llama_context_params * cparams;
+    bool shares_model;
+};
+
 #include "wrapper_utils.h"
 
 #ifdef __cplusplus
@@ -101,6 +108,7 @@ enum llama_rs_params_fit_status llama_rs_params_fit(
     struct llama_model_tensor_buft_override * tensor_buft_overrides,
     size_t * margins,
     uint32_t n_ctx_min,
+    const struct llama_rs_fit_extra_model * extra,
     enum ggml_log_level log_level);
 
 size_t llama_rs_params_fit_default_margin(void);

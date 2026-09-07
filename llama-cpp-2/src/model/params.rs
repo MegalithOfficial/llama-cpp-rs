@@ -30,6 +30,24 @@ pub enum FitError {
     Error,
 }
 
+/// A second model fitted alongside the main one by
+/// [`fit_params_with_extra`](LlamaModelParams::fit_params_with_extra), e.g. a draft model.
+///
+/// Its context follows the main context, so its memory is measured again whenever that
+/// context changes.
+#[cfg(feature = "common")]
+#[derive(Debug)]
+pub struct FitExtraModel<'a> {
+    /// Path to the extra model's GGUF file.
+    pub model_path: &'a CStr,
+    /// Model parameters the extra model is measured with.
+    pub params: Pin<&'a mut LlamaModelParams>,
+    /// Context parameters of the extra model; `n_ctx` is set to the fitted main context size.
+    pub cparams: &'a mut LlamaContextParams,
+    /// Whether the weights are already counted in the main model, as for an MTP context.
+    pub shares_model: bool,
+}
+
 #[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::cast_possible_truncation)]
 const LLAMA_SPLIT_MODE_NONE: i8 = llama_cpp_sys_2::LLAMA_SPLIT_MODE_NONE as i8;
@@ -402,11 +420,58 @@ impl LlamaModelParams {
     /// Returns [`FitError::Failure`] if no fitting allocation could be found, or
     /// [`FitError::Error`] on a hard error (e.g. the model file could not be read).
     pub fn fit_params(
+        self: Pin<&mut Self>,
+        model_path: &CStr,
+        cparams: &mut LlamaContextParams,
+        margins: &mut [usize],
+        n_ctx_min: u32,
+        log_level: llama_cpp_sys_2::ggml_log_level,
+    ) -> Result<FitResult, FitError> {
+        self.fit(model_path, cparams, margins, n_ctx_min, None, log_level)
+    }
+
+    /// Fit model parameters to available device memory with a second model sharing the devices.
+    ///
+    /// Same as [`fit_params`](Self::fit_params), but the fit also accounts for `extra` — a draft
+    /// model loaded alongside the main one. If the extra model cannot be measured, llama.cpp
+    /// falls back to fitting the main model alone.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FitError::Failure`] if no fitting allocation could be found, or
+    /// [`FitError::Error`] on a hard error (e.g. either model file could not be read).
+    pub fn fit_params_with_extra(
+        self: Pin<&mut Self>,
+        model_path: &CStr,
+        cparams: &mut LlamaContextParams,
+        margins: &mut [usize],
+        n_ctx_min: u32,
+        mut extra: FitExtraModel<'_>,
+        log_level: llama_cpp_sys_2::ggml_log_level,
+    ) -> Result<FitResult, FitError> {
+        let raw_extra = llama_cpp_sys_2::llama_rs_fit_extra_model {
+            path_model: extra.model_path.as_ptr(),
+            mparams: &raw mut extra.params.params,
+            cparams: &raw mut extra.cparams.context_params,
+            shares_model: extra.shares_model,
+        };
+        self.fit(
+            model_path,
+            cparams,
+            margins,
+            n_ctx_min,
+            Some(&raw_extra),
+            log_level,
+        )
+    }
+
+    fn fit(
         mut self: Pin<&mut Self>,
         model_path: &CStr,
         cparams: &mut LlamaContextParams,
         margins: &mut [usize],
         n_ctx_min: u32,
+        extra: Option<&llama_cpp_sys_2::llama_rs_fit_extra_model>,
         log_level: llama_cpp_sys_2::ggml_log_level,
     ) -> Result<FitResult, FitError> {
         let max_devices = unsafe { llama_cpp_sys_2::llama_max_devices() };
@@ -439,6 +504,7 @@ impl LlamaModelParams {
                 self.buft_overrides.as_mut_ptr(),
                 margins.as_mut_ptr(),
                 n_ctx_min,
+                extra.map_or(std::ptr::null(), |extra| &raw const *extra),
                 log_level,
             )
         };
