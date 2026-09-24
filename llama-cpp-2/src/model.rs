@@ -798,6 +798,59 @@ impl LlamaModel {
         Ok(())
     }
 
+    /// Whether `draft` can draft for this model, by llama.cpp's speculative vocabulary
+    /// check (`common_speculative_are_compatible`): the same vocab type, the same BOS and
+    /// EOS use and ids, vocab sizes at most 128 apart, and the same text for every token
+    /// id from 5 up to the smaller vocab.
+    #[must_use]
+    pub fn is_speculation_compatible(&self, draft: &LlamaModel) -> bool {
+        const MAX_SIZE_DIFFERENCE: i32 = 128;
+        const CHECK_START_TOKEN_ID: i32 = 5;
+        let target = self.vocab_ptr();
+        let draft = draft.vocab_ptr();
+        unsafe {
+            if llama_cpp_sys_2::llama_vocab_type(target) != llama_cpp_sys_2::llama_vocab_type(draft)
+            {
+                return false;
+            }
+            let bos_added = llama_cpp_sys_2::llama_vocab_get_add_bos(target);
+            if bos_added != llama_cpp_sys_2::llama_vocab_get_add_bos(draft)
+                || (bos_added
+                    && llama_cpp_sys_2::llama_vocab_bos(target)
+                        != llama_cpp_sys_2::llama_vocab_bos(draft))
+            {
+                return false;
+            }
+            let eos_added = llama_cpp_sys_2::llama_vocab_get_add_eos(target);
+            if eos_added != llama_cpp_sys_2::llama_vocab_get_add_eos(draft)
+                || (eos_added
+                    && llama_cpp_sys_2::llama_vocab_eos(target)
+                        != llama_cpp_sys_2::llama_vocab_eos(draft))
+            {
+                return false;
+            }
+            let n_target = llama_cpp_sys_2::llama_vocab_n_tokens(target);
+            let n_draft = llama_cpp_sys_2::llama_vocab_n_tokens(draft);
+            if (n_target - n_draft).abs() > MAX_SIZE_DIFFERENCE {
+                return false;
+            }
+            for id in CHECK_START_TOKEN_ID..n_target.min(n_draft) {
+                let target_text = llama_cpp_sys_2::llama_vocab_get_text(target, id);
+                let draft_text = llama_cpp_sys_2::llama_vocab_get_text(draft, id);
+                if target_text.is_null() || draft_text.is_null() {
+                    if target_text != draft_text {
+                        return false;
+                    }
+                    continue;
+                }
+                if CStr::from_ptr(target_text) != CStr::from_ptr(draft_text) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     #[must_use]
     pub fn dflash_selector_top_k(&self) -> i32 {
         unsafe { llama_cpp_sys_2::llama_rs_model_dflash_selector_top_k(self.model.as_ptr()) }

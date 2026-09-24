@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 
 unsafe extern "C" {
     fn malloc(size: usize) -> *mut c_void;
+    fn free(ptr: *mut c_void);
 }
 
 /// A safe wrapper around `llama_batch`.
@@ -16,6 +17,8 @@ pub struct LlamaBatch<'a> {
     allocated: usize,
     /// The embedding width allocated for this batch. Zero means token-only.
     n_embd: usize,
+    /// Position rows per token: 1, or more for embedding batches of M-RoPE models.
+    n_pos_rows: usize,
     /// The logits that are initialized. Used by [`LlamaContext`] to ensure that only initialized logits are accessed.
     pub(crate) initialized_logits: Vec<i32>,
     #[allow(clippy::doc_markdown)]
@@ -39,6 +42,22 @@ pub enum BatchAddError {
     /// The provided embedding row length does not match the batch embedding width.
     #[error("Embedding length mismatch: expected {expected}, got {actual}")]
     EmbeddingLengthMismatch { expected: usize, actual: usize },
+    /// The position row is row 0 (written by the `add` methods) or beyond the allocated rows.
+    #[error("Position row {row} is not an extra row of a batch with {rows} position rows")]
+    PositionRowOutOfRange {
+        /// The requested row.
+        row: usize,
+        /// The rows the batch was allocated with.
+        rows: usize,
+    },
+    /// The position row length does not match the number of tokens in the batch.
+    #[error("Position row length mismatch: expected {expected}, got {actual}")]
+    PositionRowLengthMismatch {
+        /// Tokens in the batch.
+        expected: usize,
+        /// Positions given.
+        actual: usize,
+    },
 }
 
 impl<'a> LlamaBatch<'a> {
@@ -226,6 +245,7 @@ impl<'a> LlamaBatch<'a> {
         LlamaBatch {
             allocated: n_tokens,
             n_embd: 0,
+            n_pos_rows: 1,
             initialized_logits: vec![],
             llama_batch: batch,
             phantom: PhantomData,
@@ -254,6 +274,7 @@ impl<'a> LlamaBatch<'a> {
         LlamaBatch {
             allocated: n_tokens,
             n_embd,
+            n_pos_rows: 1,
             initialized_logits: vec![],
             llama_batch: batch,
             phantom: PhantomData,
@@ -279,21 +300,109 @@ impl<'a> LlamaBatch<'a> {
     /// ```
     #[must_use]
     pub fn new_embeddings_only(n_tokens: usize, n_embd: usize, n_seq_max: i32) -> Self {
+        Self::new_embeddings_only_with_position_rows(n_tokens, n_embd, n_seq_max, 1)
+    }
+
+    /// Like [`Self::new_embeddings_only`], with `n_pos_rows` position rows per token.
+    ///
+    /// llama.cpp reads an embedding batch of an M-RoPE model as
+    /// `pos[row * n_tokens + i]` for each of its position rows (4 for M-RoPE), where a
+    /// token batch reuses one row for all of them. The `add` methods write row 0; fill
+    /// the other rows with [`Self::set_position_row`] after the last row is added.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n_embd` or `n_pos_rows` is zero, if `n_tokens` or `n_embd` is greater
+    /// than `i32::MAX`, or if the position storage cannot be allocated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use llama_cpp_2::llama_batch::LlamaBatch;
+    /// let mut batch = LlamaBatch::new_embeddings_only_with_position_rows(2, 4, 1, 4);
+    /// batch.add_embedding(&[0.0; 4], 7, &[0], false).unwrap();
+    /// batch.add_embedding(&[0.0; 4], 8, &[0], false).unwrap();
+    /// for row in 1..3 {
+    ///     batch.set_position_row(row, &[7, 8]).unwrap();
+    /// }
+    /// batch.set_position_row(3, &[0, 0]).unwrap();
+    /// ```
+    #[must_use]
+    pub fn new_embeddings_only_with_position_rows(
+        n_tokens: usize,
+        n_embd: usize,
+        n_seq_max: i32,
+        n_pos_rows: usize,
+    ) -> Self {
         assert!(
             n_embd > 0,
             "an embeddings-only batch needs a non-zero n_embd"
         );
+        assert!(n_pos_rows > 0, "a batch needs at least one position row");
         let n_tokens_i32 = i32::try_from(n_tokens).expect("cannot fit n_tokens into a i32");
         let n_embd_i32 = i32::try_from(n_embd).expect("cannot fit n_embd into a i32");
-        let batch = unsafe { llama_batch_init(n_tokens_i32, n_embd_i32, n_seq_max) };
+        let mut batch = unsafe { llama_batch_init(n_tokens_i32, n_embd_i32, n_seq_max) };
+
+        if n_pos_rows > 1 {
+            let bytes = std::mem::size_of::<llama_pos>()
+                .checked_mul(n_tokens)
+                .and_then(|bytes| bytes.checked_mul(n_pos_rows))
+                .expect("position allocation overflow");
+            let ptr = unsafe { malloc(bytes) }.cast::<llama_pos>();
+            assert!(!ptr.is_null(), "failed to allocate position rows");
+            unsafe { free(batch.pos.cast::<c_void>()) };
+            batch.pos = ptr;
+        }
 
         LlamaBatch {
             allocated: n_tokens,
             n_embd,
+            n_pos_rows,
             initialized_logits: vec![],
             llama_batch: batch,
             phantom: PhantomData,
         }
+    }
+
+    /// Write position row `row` (1 or more; row 0 comes from the `add` methods) for every
+    /// token in the batch. Call it after the last token is added: the rows are laid out
+    /// by the batch's token count.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `row` is 0 or not below the batch's position rows, or if
+    /// `positions` does not hold one position per token in the batch.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the batch's token count does not fit into a `usize`.
+    pub fn set_position_row(
+        &mut self,
+        row: usize,
+        positions: &[llama_pos],
+    ) -> Result<(), BatchAddError> {
+        if row == 0 || row >= self.n_pos_rows {
+            return Err(BatchAddError::PositionRowOutOfRange {
+                row,
+                rows: self.n_pos_rows,
+            });
+        }
+        let n_tokens =
+            usize::try_from(self.llama_batch.n_tokens).expect("cannot fit n_tokens into a usize");
+        if positions.len() != n_tokens {
+            return Err(BatchAddError::PositionRowLengthMismatch {
+                expected: n_tokens,
+                actual: positions.len(),
+            });
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                positions.as_ptr(),
+                self.llama_batch.pos.add(row * n_tokens),
+                n_tokens,
+            );
+        }
+        Ok(())
     }
 
     /// ``llama_batch_get_one``
@@ -323,6 +432,7 @@ impl<'a> LlamaBatch<'a> {
         let batch = Self {
             allocated: 0,
             n_embd: 0,
+            n_pos_rows: 1,
             initialized_logits: vec![(tokens.len() - 1)
                 .try_into()
                 .expect("number of tokens exceeds i32::MAX + 1")],
@@ -392,6 +502,36 @@ mod tests {
             batch.add_embedding(&[0.0, 0.0], 8, &[0], false),
             Err(BatchAddError::InsufficientSpace(3))
         );
+    }
+
+    #[test]
+    fn extra_position_rows_follow_the_token_count() {
+        let mut batch = LlamaBatch::new_embeddings_only_with_position_rows(4, 1, 1, 4);
+        assert!(batch.llama_batch.token.is_null());
+        batch.add_embedding(&[1.0], 10, &[0], false).unwrap();
+        batch.add_embedding(&[2.0], 11, &[0], false).unwrap();
+        batch.set_position_row(1, &[10, 11]).unwrap();
+        batch.set_position_row(2, &[10, 11]).unwrap();
+        batch.set_position_row(3, &[0, 0]).unwrap();
+        let pos = unsafe { std::slice::from_raw_parts(batch.llama_batch.pos, 8) };
+        assert_eq!(&pos[..8], &[10, 11, 10, 11, 10, 11, 0, 0]);
+        assert_eq!(
+            batch.set_position_row(0, &[1, 2]),
+            Err(BatchAddError::PositionRowOutOfRange { row: 0, rows: 4 })
+        );
+        assert_eq!(
+            batch.set_position_row(4, &[1, 2]),
+            Err(BatchAddError::PositionRowOutOfRange { row: 4, rows: 4 })
+        );
+        assert_eq!(
+            batch.set_position_row(1, &[1]),
+            Err(BatchAddError::PositionRowLengthMismatch {
+                expected: 2,
+                actual: 1
+            })
+        );
+        let single = LlamaBatch::new_embeddings_only(1, 1, 1);
+        assert_eq!(single.n_pos_rows, 1);
     }
 
     #[test]
