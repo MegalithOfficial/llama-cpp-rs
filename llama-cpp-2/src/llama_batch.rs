@@ -75,8 +75,10 @@ impl<'a> LlamaBatch<'a> {
         let offset = self.llama_batch.n_tokens;
         let offset_usize = usize::try_from(offset).expect("cannot fit n_tokens into a usize");
         unsafe {
-            // batch.token   [batch.n_tokens] = id;
-            self.llama_batch.token.add(offset_usize).write(id);
+            // batch.token   [batch.n_tokens] = id; (embeddings-only batches carry no tokens)
+            if !self.llama_batch.token.is_null() {
+                self.llama_batch.token.add(offset_usize).write(id);
+            }
             // batch.pos     [batch.n_tokens] = pos,
             self.llama_batch.pos.add(offset_usize).write(pos);
             // batch.n_seq_id[batch.n_tokens] = seq_ids.size();
@@ -151,6 +153,23 @@ impl<'a> LlamaBatch<'a> {
         }
 
         Ok(())
+    }
+
+    /// Add an embedding row without a token, for batches created with
+    /// [`Self::new_embeddings_only`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there is insufficient space in the buffer, if the batch was not
+    /// created with embedding storage, or if the embedding width does not match.
+    pub fn add_embedding(
+        &mut self,
+        embedding: &[f32],
+        pos: llama_pos,
+        seq_ids: &[i32],
+        logits: bool,
+    ) -> Result<(), BatchAddError> {
+        self.add_with_embedding(LlamaToken(0), embedding, pos, seq_ids, logits)
     }
 
     /// Add a sequence of tokens to the batch for the given sequence id. If `logits_all` is true, the
@@ -241,6 +260,42 @@ impl<'a> LlamaBatch<'a> {
         }
     }
 
+    /// Create a new `LlamaBatch` that holds only embedding rows: `llama_batch_init` with a
+    /// non-zero `n_embd` leaves the token array null, and it stays null, so `llama_decode`
+    /// sees a pure embedding batch. Graphs without a token input (such as a `DFlash` drafter's
+    /// feature injection) need this; use [`Self::add_embedding`] to fill it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n_embd` is zero or if `n_tokens` or `n_embd` is greater than `i32::MAX`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use llama_cpp_2::llama_batch::LlamaBatch;
+    /// let mut batch = LlamaBatch::new_embeddings_only(2, 4, 1);
+    /// batch.add_embedding(&[0.0; 4], 0, &[0], false).unwrap();
+    /// assert_eq!(batch.n_tokens(), 1);
+    /// ```
+    #[must_use]
+    pub fn new_embeddings_only(n_tokens: usize, n_embd: usize, n_seq_max: i32) -> Self {
+        assert!(
+            n_embd > 0,
+            "an embeddings-only batch needs a non-zero n_embd"
+        );
+        let n_tokens_i32 = i32::try_from(n_tokens).expect("cannot fit n_tokens into a i32");
+        let n_embd_i32 = i32::try_from(n_embd).expect("cannot fit n_embd into a i32");
+        let batch = unsafe { llama_batch_init(n_tokens_i32, n_embd_i32, n_seq_max) };
+
+        LlamaBatch {
+            allocated: n_tokens,
+            n_embd,
+            initialized_logits: vec![],
+            llama_batch: batch,
+            phantom: PhantomData,
+        }
+    }
+
     /// ``llama_batch_get_one``
     /// Return batch for single sequence of tokens
     ///
@@ -302,5 +357,50 @@ impl<'a> Drop for LlamaBatch<'a> {
                 llama_batch_free(self.llama_batch);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embeddings_only_batches_carry_no_tokens() {
+        let mut batch = LlamaBatch::new_embeddings_only(3, 2, 1);
+        assert!(batch.llama_batch.token.is_null());
+        assert!(!batch.llama_batch.embd.is_null());
+        batch.add_embedding(&[1.0, 2.0], 5, &[0], false).unwrap();
+        batch
+            .add_with_embedding(LlamaToken(9), &[3.0, 4.0], 6, &[0], true)
+            .unwrap();
+        assert_eq!(batch.n_tokens(), 2);
+        assert!(batch.llama_batch.token.is_null());
+        let embd = unsafe { std::slice::from_raw_parts(batch.llama_batch.embd, 4) };
+        assert_eq!(embd, &[1.0, 2.0, 3.0, 4.0]);
+        let pos = unsafe { std::slice::from_raw_parts(batch.llama_batch.pos, 2) };
+        assert_eq!(pos, &[5, 6]);
+        assert_eq!(batch.initialized_logits, vec![1]);
+        assert_eq!(
+            batch.add_embedding(&[0.0], 7, &[0], false),
+            Err(BatchAddError::EmbeddingLengthMismatch {
+                expected: 2,
+                actual: 1
+            })
+        );
+        batch.add_embedding(&[5.0, 6.0], 7, &[0], false).unwrap();
+        assert_eq!(
+            batch.add_embedding(&[0.0, 0.0], 8, &[0], false),
+            Err(BatchAddError::InsufficientSpace(3))
+        );
+    }
+
+    #[test]
+    fn mixed_batches_still_carry_tokens() {
+        let mut batch = LlamaBatch::new_with_embeddings(1, 2, 1);
+        assert!(!batch.llama_batch.token.is_null());
+        batch
+            .add_with_embedding(LlamaToken(7), &[1.0, 2.0], 0, &[0], true)
+            .unwrap();
+        assert_eq!(unsafe { *batch.llama_batch.token }, 7);
     }
 }
