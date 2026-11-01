@@ -176,6 +176,12 @@ impl From<u32> for LlamaLazyMode {
     }
 }
 
+impl From<i32> for LlamaLazyMode {
+    fn from(value: i32) -> Self {
+        u32::try_from(value).map_or(Self::Auto, Self::from)
+    }
+}
+
 impl From<LlamaLazyMode> for u32 {
     fn from(value: LlamaLazyMode) -> Self {
         match value {
@@ -867,8 +873,27 @@ impl Default for LlamaModelParams {
 
 #[cfg(test)]
 mod tests {
-    use super::{LlamaModelParams, LlamaSplitMode};
+    use super::{LlamaLazyMode, LlamaModelParams, LlamaSplitMode};
     use std::pin::pin;
+
+    #[test]
+    fn lazy_mode_accepts_signed_and_unsigned_bindings() {
+        for (signed, unsigned, mode) in [
+            (0_i32, 0_u32, LlamaLazyMode::Off),
+            (1, 1, LlamaLazyMode::Auto),
+            (2, 2, LlamaLazyMode::On),
+        ] {
+            assert_eq!(LlamaLazyMode::from(signed), mode);
+            assert_eq!(LlamaLazyMode::from(unsigned), mode);
+            assert_eq!(
+                LlamaModelParams::default().with_lazy_mode(mode).lazy_mode(),
+                mode
+            );
+        }
+        assert_eq!(LlamaLazyMode::from(-1_i32), LlamaLazyMode::Auto);
+        assert_eq!(LlamaLazyMode::from(3_i32), LlamaLazyMode::Auto);
+        assert_eq!(LlamaLazyMode::from(u32::MAX), LlamaLazyMode::Auto);
+    }
 
     #[test]
     fn default_fit_margin_comes_from_common_params() {
