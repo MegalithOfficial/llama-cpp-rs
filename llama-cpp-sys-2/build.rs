@@ -229,6 +229,30 @@ fn library_file_exists(
     })
 }
 
+fn macos_link_search_path() -> Option<String> {
+    let output = Command::new("clang")
+        .arg("--print-search-dirs")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        println!(
+            "cargo:warning=failed to run 'clang --print-search-dirs', continuing without a link search path"
+        );
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains("libraries: =") {
+            let path = line.split('=').nth(1)?;
+            return Some(format!("{path}/lib/darwin"));
+        }
+    }
+
+    println!("cargo:warning=failed to determine the clang runtime search path, continuing without it");
+    None
+}
+
 fn validate_android_ndk(ndk_path: &str) -> Result<(), String> {
     let ndk_path = Path::new(ndk_path);
 
@@ -1366,6 +1390,16 @@ fn main() {
             }
             println!("cargo:rustc-link-lib=framework=Accelerate");
             println!("cargo:rustc-link-lib=c++");
+
+            // ggml-metal's `@available` checks call `__isPlatformVersionAtLeast`. Rust's std
+            // also defines it, but release builds with LTO can drop that copy before the
+            // native libraries are linked, so link clang's runtime, which always has it.
+            if target_triple.ends_with("-apple-darwin") {
+                if let Some(path) = macos_link_search_path() {
+                    println!("cargo:rustc-link-lib=clang_rt.osx");
+                    println!("cargo:rustc-link-search={path}");
+                }
+            }
         }
         TargetOs::Android => {
             if cfg!(feature = "static-stdcxx") {
