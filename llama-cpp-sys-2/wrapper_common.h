@@ -7,7 +7,7 @@
 
 struct llama_model;
 struct llama_sampler;
-struct llama_rs_mtp_speculative;
+struct llama_rs_chat_parser;
 struct llama_vocab;
 
 struct llama_rs_grammar_trigger {
@@ -19,7 +19,7 @@ struct llama_rs_grammar_trigger {
 struct llama_rs_chat_template_result {
     char * prompt;
     char * grammar;
-    char * parser;
+    struct llama_rs_chat_parser * parser;
     char * generation_prompt;
     int chat_format;
     bool grammar_lazy;
@@ -112,6 +112,8 @@ enum llama_rs_params_fit_status llama_rs_params_fit(
     enum ggml_log_level log_level);
 
 size_t llama_rs_params_fit_default_margin(void);
+
+void llama_rs_chat_parser_free(struct llama_rs_chat_parser * parser);
 
 void llama_rs_memory_breakdown_print(const struct llama_context * ctx);
 

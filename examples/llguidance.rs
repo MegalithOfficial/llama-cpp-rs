@@ -10,7 +10,6 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 use llguidance::api::TopLevelGrammar;
@@ -32,9 +31,7 @@ fn main() {
         .new_context(&backend, ctx_params)
         .expect("unable to create the llama_context");
 
-    let tokens_list = model
-        .str_to_token(prompt, AddBos::Always)
-        .expect("failed to tokenize prompt");
+    let tokens_list = model.vocab().tokenize(prompt.as_bytes(), true, true);
 
     let mut batch = LlamaBatch::new(512, 1);
     let last_index = i32::try_from(tokens_list.len()).expect("prompt too long") - 1;
@@ -58,7 +55,9 @@ fn main() {
     let grammar = TopLevelGrammar::from_tagged_str("json", schema).expect("invalid grammar");
     let tok_env = LlamaSampler::llguidance_tok_env(&model);
     let factory = ParserFactory::new_simple(&tok_env).expect("failed to build parser factory");
-    let parser = factory.create_parser(grammar).expect("failed to create parser");
+    let parser = factory
+        .create_parser(grammar)
+        .expect("failed to create parser");
     let matcher = Matcher::new(Ok(parser));
 
     let llg_sampler = LlamaSampler::from(matcher);
@@ -75,13 +74,14 @@ fn main() {
     while n_cur <= 128 {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
 
-        if token == model.token_eos() {
+        if model.vocab().is_eog(token) {
             break;
         }
 
-        let output_string = model
-            .token_to_piece(token, &mut decoder, true, None)
-            .unwrap();
+        let tokens = model.vocab().token_to_piece(token, true, None);
+        let mut output_string =
+            String::with_capacity(decoder.max_utf8_buffer_length(tokens.len()).unwrap());
+        let (_, _, _) = decoder.decode_to_string(&tokens, &mut output_string, false);
         print!("{output_string}");
         std::io::stdout().flush().unwrap();
 

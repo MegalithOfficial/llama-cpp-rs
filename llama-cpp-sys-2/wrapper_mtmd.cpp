@@ -15,7 +15,7 @@ extern "C" size_t mtmd_rs_get_memory_usage(
     }
 
     const std::map<ggml_backend_dev_t, size_t> measured =
-        mtmd_get_memory_usage(mmproj_fname, ctx_params);
+        mtmd_get_memory_usage(mmproj_fname, ctx_params).backend_mem_usage;
     if (usage == nullptr || capacity == 0) {
         return measured.size();
     }

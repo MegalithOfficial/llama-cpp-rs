@@ -19,13 +19,16 @@ pub struct LlamaBatch<'a> {
     n_embd: usize,
     /// Position rows per token: 1, or more for embedding batches of M-RoPE models.
     n_pos_rows: usize,
-    /// The logits that are initialized. Used by [`LlamaContext`] to ensure that only initialized logits are accessed.
-    pub(crate) initialized_logits: Vec<i32>,
     #[allow(clippy::doc_markdown)]
     /// The llama_cpp batch. always initialize by `llama_cpp_sys_2::llama_batch_init(allocated, <unknown>, <unknown>)`
     pub(crate) llama_batch: llama_batch,
     phantom: PhantomData<&'a [LlamaToken]>,
 }
+
+// SAFETY: The batch is POD, with getters using `&` and setters using `&mut`.
+unsafe impl Send for LlamaBatch<'_> {}
+// SAFETY: Same as above.
+unsafe impl Sync for LlamaBatch<'_> {}
 
 /// Errors that can occur when adding a token to a batch.
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
@@ -65,7 +68,6 @@ impl<'a> LlamaBatch<'a> {
     /// the number of tokens to 0.
     pub fn clear(&mut self) {
         self.llama_batch.n_tokens = 0;
-        self.initialized_logits.clear();
     }
 
     /// add a token to the batch for sequences `seq_ids` at position `pos`. If `logits` is true, the
@@ -117,12 +119,6 @@ impl<'a> LlamaBatch<'a> {
                 .logits
                 .add(offset_usize)
                 .write(i8::from(logits));
-        }
-
-        if logits {
-            self.initialized_logits.push(offset);
-        } else {
-            self.initialized_logits.retain(|l| l != &offset);
         }
 
         // batch.n_tokens++;
@@ -246,7 +242,6 @@ impl<'a> LlamaBatch<'a> {
             allocated: n_tokens,
             n_embd: 0,
             n_pos_rows: 1,
-            initialized_logits: vec![],
             llama_batch: batch,
             phantom: PhantomData,
         }
@@ -275,7 +270,6 @@ impl<'a> LlamaBatch<'a> {
             allocated: n_tokens,
             n_embd,
             n_pos_rows: 1,
-            initialized_logits: vec![],
             llama_batch: batch,
             phantom: PhantomData,
         }
@@ -358,7 +352,6 @@ impl<'a> LlamaBatch<'a> {
             allocated: n_tokens,
             n_embd,
             n_pos_rows,
-            initialized_logits: vec![],
             llama_batch: batch,
             phantom: PhantomData,
         }
@@ -433,9 +426,6 @@ impl<'a> LlamaBatch<'a> {
             allocated: 0,
             n_embd: 0,
             n_pos_rows: 1,
-            initialized_logits: vec![(tokens.len() - 1)
-                .try_into()
-                .expect("number of tokens exceeds i32::MAX + 1")],
             llama_batch: batch,
             phantom: PhantomData,
         };
@@ -489,7 +479,6 @@ mod tests {
         assert_eq!(embd, &[1.0, 2.0, 3.0, 4.0]);
         let pos = unsafe { std::slice::from_raw_parts(batch.llama_batch.pos, 2) };
         assert_eq!(pos, &[5, 6]);
-        assert_eq!(batch.initialized_logits, vec![1]);
         assert_eq!(
             batch.add_embedding(&[0.0], 7, &[0], false),
             Err(BatchAddError::EmbeddingLengthMismatch {

@@ -263,12 +263,6 @@ impl LlamaModelParams {
         &self.params
     }
 
-    /// Return the tensor split produced by parameter fitting.
-    #[must_use]
-    pub fn tensor_split(&self) -> &[f32] {
-        &self.tensor_split
-    }
-
     /// See [`KvOverrides`]
     ///
     /// # Examples
@@ -314,7 +308,7 @@ impl LlamaModelParams {
     ) {
         let kv_override = self
             .kv_overrides
-            .get_mut(0)
+            .last_mut()
             .expect("kv_overrides did not have a next allocated");
 
         assert_eq!(kv_override.key[0], 0, "last kv_override was not empty");
@@ -358,7 +352,7 @@ impl LlamaModelParams {
     pub fn add_cpu_buft_override(mut self: Pin<&mut Self>, key: &CStr) {
         let buft_override = self
             .buft_overrides
-            .get_mut(0)
+            .last_mut()
             .expect("buft_overrides did not have a next allocated");
 
         assert!(
@@ -436,6 +430,8 @@ impl LlamaModelParams {
     /// - No `tensor_buft_overrides` may be set. Do not call
     ///   [`add_cpu_buft_override`](Self::add_cpu_buft_override) or
     ///   [`add_cpu_moe_override`](Self::add_cpu_moe_override) before this.
+    /// - No tensor split may be set. A split from
+    ///   [`with_tensor_split`](Self::with_tensor_split) is discarded and replaced by the fitted one.
     /// - `cparams.n_ctx` is only auto-selected if it is `0`; otherwise it is left alone.
     ///
     /// # Arguments
@@ -592,6 +588,9 @@ impl LlamaModelParams {
     /// mmaps where the platform allows it, so it reads back as `true`.
     #[must_use]
     pub fn use_mmap(&self) -> bool {
+        // `LLAMA_LOAD_MODE_AUTO` generally translates to `use_mmap`.
+        // FIXME(madsmtm): Change this API to expose the load mode directly,
+        // instead of making it two methods.
         matches!(
             self.params.load_mode,
             llama_cpp_sys_2::LLAMA_LOAD_MODE_AUTO
@@ -709,6 +708,44 @@ impl LlamaModelParams {
         self
     }
 
+    /// Sets each device's share of the model, parallel to
+    /// [`with_devices`](Self::with_devices).
+    ///
+    /// Shares are relative, so they need not sum to one. An empty slice clears the split and
+    /// restores llama.cpp's default, which distributes in proportion to free memory. The
+    /// slice is padded with zeroes to `llama_max_devices()`, as the C API requires.
+    ///
+    /// The pointer handed to llama.cpp addresses the `Vec`'s heap buffer, not this struct, so
+    /// it survives the moves that builder chaining performs.
+    ///
+    /// # Errors
+    /// Returns `LlamaCppError::MaxDevicesExceeded` if `split` is longer than
+    /// `llama_max_devices()`.
+    pub fn with_tensor_split(mut self, split: &[f32]) -> Result<Self, LlamaCppError> {
+        if split.is_empty() {
+            self.tensor_split.clear();
+            self.params.tensor_split = null::<f32>();
+            return Ok(self);
+        }
+        let max_devices = crate::max_devices();
+        if split.len() > max_devices {
+            return Err(LlamaCppError::MaxDevicesExceeded(max_devices));
+        }
+        self.tensor_split.clear();
+        self.tensor_split.extend_from_slice(split);
+        self.tensor_split.resize(max_devices, 0.0);
+        self.params.tensor_split = self.tensor_split.as_ptr();
+        Ok(self)
+    }
+
+    /// Each device's share of the model, as last set by
+    /// [`with_tensor_split`](Self::with_tensor_split). Empty when the split is llama.cpp's
+    /// free-memory default.
+    #[must_use]
+    pub fn tensor_split(&self) -> &[f32] {
+        &self.tensor_split
+    }
+
     /// sets `devices`
     ///
     /// The devices are specified as indices that correspond to the ggml backend device indices.
@@ -801,12 +838,14 @@ impl LlamaModelParams {
         })
     }
 
+    /// Sets whether to load bundled multi-token prediction (MTP) tensors.
     #[must_use]
     pub fn with_load_mtp(mut self, load_mtp: bool) -> Self {
         self.params.load_mtp = load_mtp;
         self
     }
 
+    /// Returns whether bundled multi-token prediction (MTP) tensors are loaded.
     #[must_use]
     pub fn load_mtp(&self) -> bool {
         self.params.load_mtp
@@ -846,6 +885,7 @@ impl LlamaModelParams {
 /// assert_eq!(params.split_mode(), Ok(LlamaSplitMode::Layer), "split_mode should be LAYER");
 /// assert_eq!(params.devices().len(), 0, "devices should be empty");
 /// assert_eq!(params.no_alloc(), false, "no_alloc should be false");
+/// assert_eq!(params.load_mtp(), false, "load_mtp should be false");
 /// ```
 impl Default for LlamaModelParams {
     fn default() -> Self {
@@ -873,6 +913,7 @@ impl Default for LlamaModelParams {
 
 #[cfg(test)]
 mod tests {
+    use super::kv_overrides::ParamOverrideValue;
     use super::{LlamaLazyMode, LlamaModelParams, LlamaSplitMode};
     use std::pin::pin;
 
@@ -923,6 +964,73 @@ mod tests {
     }
 
     #[test]
+    fn tensor_buft_override_appends_on_second_call() {
+        // add_cpu_buft_override is documented as appending. After the first call the
+        // vector is [filled, null-terminator]; writing the second override into the
+        // terminator (then pushing a new one) is what keeps the list null-terminated.
+        let mut params = pin!(LlamaModelParams::default());
+        params
+            .as_mut()
+            .add_cpu_buft_override(c"blk\\.0\\.ffn_(up|down|gate)_(ch|)exps");
+        params
+            .as_mut()
+            .add_cpu_buft_override(c"blk\\.1\\.ffn_(up|down|gate)_(ch|)exps");
+
+        assert_eq!(
+            params.tensor_buft_override_patterns(),
+            vec![
+                "blk\\.0\\.ffn_(up|down|gate)_(ch|)exps".to_owned(),
+                "blk\\.1\\.ffn_(up|down|gate)_(ch|)exps".to_owned(),
+            ],
+        );
+    }
+
+    #[test]
+    fn kv_override_appends_on_second_call() {
+        // Same [filled, null-terminator] layout as the buffer overrides: the second call has to
+        // write into the terminator, not back into slot 0.
+        let mut params = pin!(LlamaModelParams::default());
+        params
+            .as_mut()
+            .append_kv_override(c"first", ParamOverrideValue::Int(1));
+        params
+            .as_mut()
+            .append_kv_override(c"second", ParamOverrideValue::Int(2));
+
+        let kv_overrides = params.kv_overrides().into_iter().collect::<Vec<_>>();
+        assert_eq!(kv_overrides.len(), 2);
+        assert_eq!(kv_overrides[0].0.to_bytes(), b"first");
+        assert_eq!(kv_overrides[1].0.to_bytes(), b"second");
+        assert_eq!(kv_overrides[1].1, ParamOverrideValue::Int(2));
+    }
+
+    #[test]
+    fn tensor_split_round_trips_and_pads() {
+        let max = crate::max_devices();
+        let params = LlamaModelParams::default()
+            .with_tensor_split(&[0.25, 0.75])
+            .expect("two devices is under any max");
+        assert_eq!(params.tensor_split().len(), max);
+        assert_eq!(&params.tensor_split()[..2], &[0.25, 0.75]);
+        assert!(params.tensor_split()[2..].iter().all(|share| *share == 0.0));
+
+        // The pointer must survive the moves builder chaining performs.
+        let params = params.with_n_gpu_layers(99);
+        assert_eq!(&params.tensor_split()[..2], &[0.25, 0.75]);
+
+        let cleared = params.with_tensor_split(&[]).expect("empty clears");
+        assert!(cleared.tensor_split().is_empty());
+    }
+
+    #[test]
+    fn tensor_split_rejects_more_devices_than_llama_supports() {
+        let too_many = vec![1.0_f32; crate::max_devices() + 1];
+        assert!(LlamaModelParams::default()
+            .with_tensor_split(&too_many)
+            .is_err());
+    }
+
+    #[test]
     fn tensor_split_mode_round_trips() {
         assert_eq!(
             LlamaSplitMode::try_from(llama_cpp_sys_2::LLAMA_SPLIT_MODE_TENSOR),
@@ -936,6 +1044,18 @@ mod tests {
             i32::from(LlamaSplitMode::Tensor),
             llama_cpp_sys_2::LLAMA_SPLIT_MODE_TENSOR as i32
         );
+    }
+
+    #[test]
+    fn load_mtp_round_trips() {
+        let params = LlamaModelParams::default();
+        assert!(!params.load_mtp());
+
+        let params = params.with_load_mtp(true);
+        assert!(params.load_mtp());
+
+        let params = params.with_load_mtp(false);
+        assert!(!params.load_mtp());
     }
 
     #[test]

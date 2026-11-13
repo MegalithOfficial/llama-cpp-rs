@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use hf_hub::api::sync::ApiBuilder;
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::context::LlamaContext;
@@ -20,7 +19,6 @@ use llama_cpp_2::ggml_time_us;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
 
 #[derive(clap::Parser, Debug, Clone)]
@@ -62,7 +60,12 @@ impl Model {
     fn get_or_load(self) -> Result<PathBuf> {
         match self {
             Model::Local { path } => Ok(path),
-            Model::HuggingFace { model, repo } => ApiBuilder::new()
+            #[cfg(target_family = "wasm")]
+            Model::HuggingFace { .. } => {
+                anyhow::bail!("cannot download model from huggingface on WASM")
+            }
+            #[cfg(not(target_family = "wasm"))]
+            Model::HuggingFace { model, repo } => hf_hub::api::sync::ApiBuilder::new()
                 .with_progress(true)
                 .build()
                 .with_context(|| "unable to create huggingface api")?
@@ -118,9 +121,8 @@ fn main() -> Result<()> {
 
     // tokenize the prompt
     let tokens_lines_list = prompt_lines
-        .map(|line| model.str_to_token(line, AddBos::Always))
-        .collect::<Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to tokenize {prompt}"))?;
+        .map(|line| model.vocab().tokenize(line.as_bytes(), true, true))
+        .collect::<Vec<_>>();
 
     let n_ctx = ctx.n_ctx() as usize;
     let n_ctx_train = model.n_ctx_train();
@@ -135,18 +137,25 @@ fn main() -> Result<()> {
     eprintln!();
 
     let mut decoder = encoding_rs::UTF_8.new_decoder();
+    let mut buffer = Vec::new();
 
     for (i, token_line) in tokens_lines_list.iter().enumerate() {
         eprintln!("Prompt {i}");
         for token in token_line {
-            // Attempt to convert token to string and print it; if it fails, print the token instead
-            match model.token_to_piece(*token, &mut decoder, true, None) {
-                Ok(token_str) => eprintln!("{token} --> {token_str}"),
-                Err(e) => {
-                    eprintln!("Failed to convert token to string, error: {e}");
-                    eprintln!("Token value: {token}");
-                }
-            }
+            // Convert token to string and print it.
+            buffer.clear();
+            model
+                .vocab()
+                .token_to_piece_into(*token, &mut buffer, true, None);
+
+            let mut token_str =
+                String::with_capacity(decoder.max_utf8_buffer_length(buffer.len()).unwrap());
+            let (result, read, _) = decoder.decode_to_string(&buffer, &mut token_str, false);
+            assert!(
+                matches!(result, encoding_rs::CoderResult::InputEmpty) && read == buffer.len(),
+                "UTF-8 decoder capacity bound must consume the complete token"
+            );
+            eprintln!("{token} --> {token_str}");
         }
         eprintln!();
     }

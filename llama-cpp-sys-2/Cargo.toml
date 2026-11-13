@@ -1,14 +1,15 @@
 [package]
 name = "llama-cpp-sys-2"
 description = "Low Level Bindings to llama.cpp"
-version = "0.1.154"
+version = "0.1.162"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/utilityai/llama-cpp-rs"
 links = "llama"
 
 include = [
-    "wrapper.h",
+    # Our files
+    "README.md",
     "wrapper_common.h",
     "wrapper_common.cpp",
     "wrapper_oai.h",
@@ -19,59 +20,37 @@ include = [
     "build.rs",
     "/src",
 
-    "/llama.cpp/common/**/*.h",
-    "/llama.cpp/common/**/*.hpp",
-    "/llama.cpp/common/**/*.cpp",
-    "/llama.cpp/common/**/*.cmake",
-    "/llama.cpp/ggml/include/*.h",
-    "/llama.cpp/ggml/src/*.h",
-    "/llama.cpp/ggml/src/*.c",
-    "/llama.cpp/ggml/src/*.cpp",
-    "/llama.cpp/src/*.h",
-    "/llama.cpp/src/*.cpp",
-    "/llama.cpp/src/models/*.h",
-    "/llama.cpp/src/models/*.cpp",
-    "/llama.cpp/tools/mtmd/*.h",
-    "/llama.cpp/tools/mtmd/*.cpp",
-    "/llama.cpp/tools/mtmd/models/*.h",
-    "/llama.cpp/tools/mtmd/models/*.cpp",
-    "/llama.cpp/tools/mtmd/debug/*.h",
-    "/llama.cpp/tools/mtmd/debug/*.cpp",
+    # Everything needed for building GGML (CMake, include and src)
+    #
+    # `llama.cpp` already only includes the most important stuff
+    # from https://github.com/ggml-org/ggml.
+    "/llama.cpp/ggml",
 
+    # lLama.cpp's own sources.
+    "/llama.cpp/include",
+    "/llama.cpp/common",
+    "/llama.cpp/src",
+
+    # mtmd sources. Contains tests files that we don't want, so those
+    # are filtered out.
+    "/llama.cpp/tools/mtmd/**/*.h",
+    "/llama.cpp/tools/mtmd/**/*.cpp",
+    "/llama.cpp/tools/mtmd/**/CMakeLists.txt",
+
+    # Vendored sources.
+    "/llama.cpp/vendor",
+
+    # Various build files.
     "/llama.cpp/convert_hf_to_gguf.py", # Yes, it's required
     "/llama.cpp/conversion/**/*.py",
     "/llama.cpp/gguf-py/**/*.py",
-    "/llama.cpp/common/build-info.cpp.in",
-
-    "/llama.cpp/ggml/src/ggml-cuda.cu",
-    "/llama.cpp/ggml/src/ggml-metal.m",
-    "/llama.cpp/ggml/src/ggml-metal.metal",
-
-    "/llama.cpp/include/llama.h",
-    "/llama.cpp/include/llama-cpp.h",
-
-    "/llama.cpp/ggml/src/ggml-cpu/**/*",
-    "/llama.cpp/ggml/src/ggml-cuda/**/*",
-    "/llama.cpp/ggml/src/ggml-metal/**/*",
-    "/llama.cpp/ggml/src/ggml-vulkan/**/*",
-    "/llama.cpp/ggml/src/ggml-opencl/**/*",
-    "/llama.cpp/ggml/src/ggml-hip/**/*",
-
-    "/llama.cpp/ggml/src/llamafile/sgemm.h",
-    "/llama.cpp/ggml/src/llamafile/sgemm.cpp",
-
     "/llama.cpp/pocs",
-    "/llama.cpp/vendor",
-
     "/llama.cpp/CMakeLists.txt",
-    "/llama.cpp/common/CMakeLists.txt",
-    "/llama.cpp/ggml/CMakeLists.txt",
-    "/llama.cpp/ggml/src/CMakeLists.txt",
-    "/llama.cpp/src/CMakeLists.txt",
-
     "/llama.cpp/cmake",
-    "/llama.cpp/ggml/cmake",
-    "/llama.cpp/common/cmake",
+    "/llama.cpp/tools/CMakeLists.txt",
+
+    # License.
+    "/llama.cpp/LICENSE",
 ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -79,7 +58,6 @@ include = [
 [dependencies]
 
 [build-dependencies]
-bindgen = { workspace = true }
 cc = { workspace = true, features = ["parallel"] }
 cmake = "0.1"
 find_cuda_helper = "0.2.0"
@@ -108,6 +86,9 @@ opencl = []
 # Build the BLAS backend with Intel MKL (x86_64-only; requires MKLROOT set).
 mkl = []
 openmp = []
+# Enable WebGPU support on WASM targets.
+# This requires `-Clink-arg=--use-port=emdawnwebgpu` to be able to link.
+webgpu = []
 # Link GNU OpenMP (`libgomp`) statically on GNU targets. This is useful for
 # downstreams that ship self-contained binaries while keeping OpenMP enabled.
 static-openmp = ["openmp"]

@@ -29,7 +29,7 @@ use llama_cpp_2::gguf::GgufContext;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel};
+use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::token::LlamaToken;
 
 #[derive(Parser, Debug, Clone)]
@@ -117,9 +117,7 @@ fn main() -> Result<()> {
     let model = LlamaModel::load_from_file(&backend, &model_path, &model_params)
         .with_context(|| format!("unable to load model from {}", model_path.display()))?;
 
-    let mut tokens = model
-        .str_to_token(&prompt, AddBos::Always)
-        .with_context(|| "failed to tokenize prompt")?;
+    let mut tokens = model.vocab().tokenize(prompt.as_bytes(), true, true);
 
     if tokens.is_empty() {
         bail!("prompt tokenized to an empty token list");
@@ -155,7 +153,7 @@ fn main() -> Result<()> {
         .set_embeddings_nextn(true, true)
         .with_context(|| "failed to enable MTP draft nextn embeddings")?;
 
-    let eos = model.token_eos();
+    let eos = model.vocab().eos();
     let n_embd =
         usize::try_from(model.n_embd()).with_context(|| "n_embd does not fit into usize")?;
     let mut decoder = encoding_rs::UTF_8.new_decoder();
@@ -182,9 +180,9 @@ fn main() -> Result<()> {
         )?;
 
         for token in &accepted {
-            let piece = model
-                .token_to_piece(*token, &mut decoder, true, None)
-                .with_context(|| format!("failed to decode token {token}"))?;
+            let bytes = model.vocab().token_to_piece(*token, true, None);
+            let mut piece = String::with_capacity(bytes.len());
+            let _ = decoder.decode_to_string(&bytes, &mut piece, false);
             print!("{piece}");
             std::io::stdout().flush()?;
 

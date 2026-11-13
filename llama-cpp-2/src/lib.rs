@@ -17,6 +17,7 @@
 use std::ffi::{c_char, CStr, CString, NulError};
 use std::fmt::Debug;
 use std::num::NonZeroI32;
+use std::sync::OnceLock;
 
 use crate::llama_batch::BatchAddError;
 use std::os::raw::c_int;
@@ -33,12 +34,14 @@ mod log;
 pub mod model;
 #[cfg(feature = "mtmd")]
 pub mod mtmd;
+mod ptr;
 #[cfg(feature = "common")]
 pub mod openai;
 pub mod sampling;
 pub mod timing;
 pub mod token;
 pub mod token_type;
+pub mod vocab;
 
 pub use crate::context::session::{LlamaStateSeqFlags, SeqState};
 
@@ -227,19 +230,15 @@ pub enum EncodeError {
     Unknown(c_int),
 }
 
-/// When embedding related functions fail
+/// Fetching embeddings failed.
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
-pub enum EmbeddingsError {
-    /// Embeddings weren't enabled in the context options
-    #[error("Embeddings weren't enabled in the context options")]
-    NotEnabled,
-    /// Logits weren't enabled for the given token
-    #[error("Logits were not enabled for the given token")]
-    LogitsNotEnabled,
-    /// The given sequence index exceeds the max sequence id
-    #[error("Can't use sequence embeddings with a model supporting only LLAMA_POOLING_TYPE_NONE")]
-    NonePoolType,
-}
+#[error("Embeddings or logits weren't enabled")]
+pub struct EmbeddingsError(());
+
+/// Retrieving embeddings sequences failed.
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
+#[error("Embeddings or logits weren't enabled, or the model was configured with LLAMA_POOLING_TYPE_NONE")]
+pub struct EmbeddingsSeqError(());
 
 /// Errors that can occur when initializing a grammar sampler
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
@@ -423,32 +422,6 @@ mod tests {
 
         assert!(grammar.contains("root ::="));
     }
-}
-
-/// An error that can occur when converting a token to a string.
-#[derive(Debug, thiserror::Error, Clone)]
-#[non_exhaustive]
-pub enum TokenToStringError {
-    /// the token type was unknown
-    #[error("Unknown Token Type")]
-    UnknownTokenType,
-    /// There was insufficient buffer space to convert the token to a string.
-    #[error("Insufficient Buffer Space {0}")]
-    InsufficientBufferSpace(c_int),
-    /// The token was not valid utf8.
-    #[error("FromUtf8Error {0}")]
-    FromUtf8Error(#[from] FromUtf8Error),
-}
-
-/// Failed to convert a string to a token sequence.
-#[derive(Debug, thiserror::Error)]
-pub enum StringToTokenError {
-    /// the string contained a null byte and thus could not be converted to a c string.
-    #[error("{0}")]
-    NulError(#[from] NulError),
-    #[error("{0}")]
-    /// Failed to convert a provided integer to a [`c_int`].
-    CIntConversionError(#[from] std::num::TryFromIntError),
 }
 
 /// Failed to apply model chat template.
@@ -701,21 +674,42 @@ extern "C" fn logs_to_trace(
 pub fn send_logs_to_tracing(options: LogOptions) {
     // TODO: Reinitialize the state to support calling send_logs_to_tracing multiple times.
 
-    // We set up separate log states for llama.cpp and ggml to make sure that CONT logs between the two
-    // can't possibly interfere with each other. In other words, if llama.cpp emits a log without a trailing
-    // newline and calls a GGML function, the logs won't be weirdly intermixed and instead we'll llama.cpp logs
-    // will CONT previous llama.cpp logs and GGML logs will CONT previous ggml logs.
+    // We set up separate log states for each backend to make sure that CONT
+    // logs between them can't possibly interfere with each other.
+    //
+    // In other words, if llama.cpp emits a log without a trailing newline and
+    // calls a GGML function, the logs won't be weirdly intermixed and instead
+    // we'll llama.cpp logs will CONT previous llama.cpp logs and GGML logs
+    // will CONT previous ggml logs.
+    static LLAMA_STATE: OnceLock<Box<log::State>> = OnceLock::new();
+    #[cfg(feature = "mtmd")]
+    static MTMD_STATE: OnceLock<Box<log::State>> = OnceLock::new();
+    static GGML_STATE: OnceLock<Box<log::State>> = OnceLock::new();
+
     let llama_heap_state = Box::as_ref(
-        log::LLAMA_STATE
+        LLAMA_STATE
             .get_or_init(|| Box::new(log::State::new(log::Module::LlamaCpp, options.clone()))),
     ) as *const _;
+
+    #[cfg(feature = "mtmd")]
+    let mtmd_heap_state = Box::as_ref(
+        MTMD_STATE.get_or_init(|| Box::new(log::State::new(log::Module::Mtmd, options.clone()))),
+    ) as *const _;
+
     let ggml_heap_state = Box::as_ref(
-        log::GGML_STATE.get_or_init(|| Box::new(log::State::new(log::Module::GGML, options))),
+        GGML_STATE.get_or_init(|| Box::new(log::State::new(log::Module::GGML, options))),
     ) as *const _;
 
     unsafe {
-        // GGML has to be set after llama since setting llama sets ggml as well.
         llama_cpp_sys_2::llama_log_set(Some(logs_to_trace), llama_heap_state as *mut _);
+
+        // There is both `mtmd_log_set` and `mtmd_helper_log_set`. We use the
+        // helper, since we don't particularly want to differentiate these
+        // two, and the helper calls the normal `mtmd_log_set` as well.
+        #[cfg(feature = "mtmd")]
+        llama_cpp_sys_2::mtmd_helper_log_set(Some(logs_to_trace), mtmd_heap_state as *mut _);
+
+        // GGML has to be set after llama since setting llama logs sets ggml logs as well.
         llama_cpp_sys_2::ggml_log_set(Some(logs_to_trace), ggml_heap_state as *mut _);
     }
 }

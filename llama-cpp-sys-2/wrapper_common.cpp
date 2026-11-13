@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "llama.cpp/common/fit.h"
+#include "llama.cpp/common/json.h"
 #include "llama.cpp/common/json-schema-to-grammar.h"
 #include "llama.cpp/common/speculative.h"
 #include "llama.cpp/include/llama.h"
@@ -26,9 +27,7 @@ extern "C" void llama_rs_chat_template_result_free(struct llama_rs_chat_template
     if (result->grammar) {
         std::free(result->grammar);
     }
-    if (result->parser) {
-        std::free(result->parser);
-    }
+    llama_rs_chat_parser_free(result->parser);
     if (result->generation_prompt) {
         std::free(result->generation_prompt);
     }
@@ -317,16 +316,14 @@ extern "C" enum llama_rs_params_fit_status llama_rs_params_fit(
         if (!extra->path_model || !extra->mparams || !extra->cparams) {
             return LLAMA_RS_PARAMS_FIT_STATUS_ERROR;
         }
-        extra_model = {
-            extra->path_model,
-            extra->mparams,
-            extra->cparams,
-            extra->shares_model,
-        };
+        extra_model.paths_model = { extra->path_model };
+        extra_model.mparams = extra->mparams;
+        extra_model.cparams = extra->cparams;
+        extra_model.shares_model = extra->shares_model;
     }
 
     switch (common_fit_params(
-        path_model,
+        std::vector<std::string>{ path_model },
         mparams,
         cparams,
         tensor_split,

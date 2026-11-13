@@ -92,15 +92,13 @@ llama_rs_status llama_rs_chat_parse_to_oaicompat(
     const char * input,
     bool is_partial,
     int chat_format,
-    bool parse_tool_calls,
-    const char * parser_data,
+    const struct llama_rs_chat_parser * parser,
     const char * generation_prompt,
     char ** out_json);
 
 struct llama_rs_chat_parse_state_oaicompat * llama_rs_chat_parse_state_init_oaicompat(
     int chat_format,
-    bool parse_tool_calls,
-    const char * parser_data,
+    const struct llama_rs_chat_parser * parser,
     const char * generation_prompt);
 
 llama_rs_status llama_rs_chat_parse_state_update_oaicompat(

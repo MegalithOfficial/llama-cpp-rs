@@ -11,6 +11,29 @@
 #include "llama.cpp/include/llama.h"
 #include "wrapper_utils.h"
 
+struct llama_rs_chat_parser {
+    common_peg_arena arena;
+};
+
+extern "C" void llama_rs_chat_parser_free(struct llama_rs_chat_parser * parser) {
+    delete parser;
+}
+
+static common_chat_parser_params llama_rs_parser_params(
+    int chat_format,
+    const struct llama_rs_chat_parser * parser,
+    const char * generation_prompt) {
+    common_chat_parser_params syntax;
+    syntax.format = static_cast<common_chat_format>(chat_format);
+    if (generation_prompt && std::strlen(generation_prompt) > 0) {
+        syntax.generation_prompt = common_chat_input(std::string(generation_prompt));
+    }
+    if (parser) {
+        syntax.parser = parser->arena;
+    }
+    return syntax;
+}
+
 struct llama_rs_chat_parse_state_oaicompat {
     common_chat_parser_params syntax;
     common_chat_msg chat_msg;
@@ -296,12 +319,12 @@ extern "C" llama_rs_status llama_rs_apply_chat_template_with_tools_oaicompat(
         }
 
         auto params = common_chat_templates_apply(tmpls.get(), inputs);
-        out_result->prompt = llama_rs_dup_string(params.prompt);
+        out_result->prompt = llama_rs_dup_string(params.prompt.str());
         if (!params.grammar.empty()) {
             out_result->grammar = llama_rs_dup_string(params.grammar);
         }
         if (!params.parser.empty()) {
-            out_result->parser = llama_rs_dup_string(params.parser);
+            out_result->parser = new llama_rs_chat_parser{ std::move(params.parser) };
         }
         if (!params.generation_prompt.empty()) {
             out_result->generation_prompt = llama_rs_dup_string(params.generation_prompt);
@@ -416,12 +439,12 @@ extern "C" llama_rs_status llama_rs_apply_chat_template_oaicompat(
         }
 
         auto params_out = common_chat_templates_apply(tmpls.get(), inputs);
-        out_result->prompt = llama_rs_dup_string(params_out.prompt);
+        out_result->prompt = llama_rs_dup_string(params_out.prompt.str());
         if (!params_out.grammar.empty()) {
             out_result->grammar = llama_rs_dup_string(params_out.grammar);
         }
         if (!params_out.parser.empty()) {
-            out_result->parser = llama_rs_dup_string(params_out.parser);
+            out_result->parser = new llama_rs_chat_parser{ std::move(params_out.parser) };
         }
         if (!params_out.generation_prompt.empty()) {
             out_result->generation_prompt = llama_rs_dup_string(params_out.generation_prompt);
@@ -474,8 +497,7 @@ extern "C" llama_rs_status llama_rs_chat_parse_to_oaicompat(
     const char * input,
     bool is_partial,
     int chat_format,
-    bool parse_tool_calls,
-    const char * parser_data,
+    const struct llama_rs_chat_parser * parser,
     const char * generation_prompt,
     char ** out_json) {
     if (!input || !out_json) {
@@ -484,17 +506,9 @@ extern "C" llama_rs_status llama_rs_chat_parse_to_oaicompat(
     *out_json = nullptr;
 
     try {
-        common_chat_parser_params syntax;
-        syntax.format = static_cast<common_chat_format>(chat_format);
-        syntax.parse_tool_calls = parse_tool_calls;
-        if (generation_prompt && std::strlen(generation_prompt) > 0) {
-            syntax.generation_prompt = generation_prompt;
-        }
-        if (parser_data && std::strlen(parser_data) > 0) {
-            syntax.parser.load(parser_data);
-        }
+        common_chat_parser_params syntax = llama_rs_parser_params(chat_format, parser, generation_prompt);
 
-        auto msg = common_chat_parse(input, is_partial, syntax);
+        auto msg = common_chat_parse(common_chat_input(std::string(input)), is_partial, syntax);
         std::vector<std::string> ids_cache;
         msg.set_tool_call_ids(ids_cache, []() { return random_string(); });
         auto json_msg = msg.to_json_oaicompat().dump();
@@ -563,19 +577,10 @@ extern "C" void llama_rs_chat_msgs_free_oaicompat(struct llama_rs_chat_msg_oaico
 
 extern "C" struct llama_rs_chat_parse_state_oaicompat * llama_rs_chat_parse_state_init_oaicompat(
     int chat_format,
-    bool parse_tool_calls,
-    const char * parser_data,
+    const struct llama_rs_chat_parser * parser,
     const char * generation_prompt) {
     try {
-        common_chat_parser_params syntax;
-        syntax.format = static_cast<common_chat_format>(chat_format);
-        syntax.parse_tool_calls = parse_tool_calls;
-        if (generation_prompt && std::strlen(generation_prompt) > 0) {
-            syntax.generation_prompt = generation_prompt;
-        }
-        if (parser_data && std::strlen(parser_data) > 0) {
-            syntax.parser.load(parser_data);
-        }
+        common_chat_parser_params syntax = llama_rs_parser_params(chat_format, parser, generation_prompt);
         return new llama_rs_chat_parse_state_oaicompat(std::move(syntax));
     } catch (const std::exception & e) {
         llama_rs_set_last_error(e.what());
@@ -602,7 +607,7 @@ extern "C" llama_rs_status llama_rs_chat_parse_state_update_oaicompat(
             state->generated_text += text_added;
         }
         auto msg_prv_copy = state->chat_msg;
-        auto new_msg = common_chat_parse(state->generated_text, is_partial, state->syntax);
+        auto new_msg = common_chat_parse(common_chat_input(state->generated_text), is_partial, state->syntax);
         std::vector<common_chat_msg_diff> diffs;
         if (!new_msg.empty()) {
             new_msg.set_tool_call_ids(state->generated_tool_call_ids, []() {
